@@ -2,7 +2,7 @@
 
 Веб-приложение для личного гардероба: загружайте фото своих вещей **без фона** (PNG/WebP с прозрачностью), сортируйте их, отмечайте тегами и собирайте образы, надевая вещи слоями на нейтральный манекен.
 
-Без маркетплейса, без социальной ленты, без аккаунтов и облака: все данные хранятся только в вашем браузере (IndexedDB).
+Без маркетплейса и социальной ленты. Работает без аккаунта (данные в браузере, IndexedDB); по желанию — вход через Google и синхронизация между устройствами через Firebase.
 
 ## Возможности
 
@@ -47,14 +47,54 @@ npm run preview  # просмотр сборки
 
 Подключите репозиторий в Netlify (Add new site → Import from Git) — настройки подтянутся автоматически.
 
+## Вход через Google и синхронизация (Firebase)
+
+Необязательная функция: если Firebase не настроен, кнопка входа скрыта и приложение работает только локально. Используются только **Firebase Auth** и **Cloud Firestore**; Firebase Storage не нужен (бесплатный план Spark подходит).
+
+### Настройка
+
+1. Создайте проект в [Firebase Console](https://console.firebase.google.com/), добавьте **Web app**.
+2. **Authentication → Sign-in method → Google** — включить. В **Authentication → Settings → Authorized domains** добавьте домен сайта (например, `ваш-сайт.netlify.app`).
+3. **Firestore Database → Create database** (production mode), затем опубликуйте правила из `firestore.rules`: вставьте их в консоли (Firestore → Rules) или выполните `npx firebase-tools deploy --only firestore:rules --project <project-id>`.
+4. Укажите конфиг веб-приложения одним из способов:
+   - впишите объект в `src/firebaseConfig.ts` → `MANUAL_CONFIG` (веб-конфиг Firebase публичный, его можно коммитить);
+   - или задайте переменные окружения (см. `.env.example`) в `.env.local` или в Netlify → Environment variables: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID` (необязательно: `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`). Переменные окружения важнее `MANUAL_CONFIG`.
+
+### Как устроено
+
+- Вход: `signInWithPopup` с Google; если окно заблокировано или это мобильное устройство без поддержки окон — `signInWithRedirect`.
+- Данные в Firestore:
+  - `users/{uid}/items/{id}` — вещь (как локально, без картинки) + `updatedAt`, `deleted`, `imageRev`;
+  - `users/{uid}/images/{id}` — фото: `{ dataUrl, rev, updatedAt }`, base64 WebP, не больше ~700 КБ (при необходимости ужимается);
+  - `users/{uid}/outfits/{id}` — образ + `updatedAt`, `deleted`.
+- IndexedDB остаётся локальным хранилищем и офлайн-кэшем; у Firestore включён `persistentLocalCache`, поэтому изменения без интернета отправятся позже.
+- **Первый вход:** локальные вещи и образы объединяются с облаком — чего нет в облаке, отправляется, чего нет на устройстве, скачивается. Дальше — синхронизация в реальном времени (`onSnapshot`).
+- Конфликты — **last-write-wins** по `updatedAt`. Удаления хранятся как «надгробия» (`deleted: true`), чтобы дойти до всех устройств.
+- Статус в шапке: «Синхронизировано», «Синхронизация…», «Офлайн».
+- **Выход:** можно оставить данные на устройстве или удалить их с устройства (в облаке они остаются).
+- Если на устройстве лежат данные другого аккаунта, при входе приложение спросит: объединить или заменить данными из облака.
+- «Удалить все данные» в настройках при входе в аккаунт удаляет данные и в облаке.
+
+### Разработка с эмуляторами
+
+```bash
+npx firebase-tools emulators:start --only auth,firestore --project demo-wardrobe   # нужна Java 21
+VITE_FIREBASE_API_KEY=fake VITE_FIREBASE_AUTH_DOMAIN=demo-wardrobe.firebaseapp.com \
+VITE_FIREBASE_PROJECT_ID=demo-wardrobe VITE_FIREBASE_APP_ID=1:1:web:1 \
+VITE_FIREBASE_EMULATOR_HOST=127.0.0.1 npm run dev
+```
+
+Юнит-тесты логики слияния: `npm test`.
+
 ## Хранение данных
 
 Вещи и образы хранятся в **IndexedDB** (база `wardrobe`, библиотека [`idb`](https://github.com/jakearchibald/idb)). Места хватает на сотни вещей: браузер обычно выделяет сайту гигабайты.
 
 | Хранилище | Содержимое |
 | --- | --- |
-| IndexedDB `items` | метаданные вещи: `{ id, name, category, tags[], color, season, occasion?, createdAt }` |
+| IndexedDB `items` | метаданные вещи: `{ id, name, category, tags[], color, season, occasion?, createdAt, updatedAt?, imageRev? }` |
 | IndexedDB `images` | картинка вещи как `Blob` (WebP/PNG), ключ — `id` вещи |
+| IndexedDB `tombstones` | отметки об удалении для синхронизации |
 | IndexedDB `outfits` | `{ id, name, createdAt, updatedAt?, layers: [{ itemId, x, y, scale, flip }] }` |
 | localStorage `wardrobe.draft.v1` | текущий образ на манекене |
 | localStorage `wardrobe.prefs.v1` | настройки (тёмная сцена) |
@@ -86,10 +126,14 @@ src/
     hit.ts             — попадание по непрозрачным пикселям при перетаскивании
     db.ts              — IndexedDB (idb): вещи, картинки-Blob, образы; persist/estimate
     storage.ts         — черновик и настройки (localStorage), миграция, экспорт/импорт
+    cloud.ts           — Firebase Auth + Firestore, движок синхронизации (грузится лениво)
+    syncMerge.ts       — чистая логика слияния last-write-wins (+ syncMerge.test.ts)
+  cloud.tsx            — вход/выход, статус синхронизации
+  firebaseConfig.ts    — конфиг Firebase (MANUAL_CONFIG или VITE_FIREBASE_*)
   components/          — Stage (сцена), Mannequin (SVG), ItemCard, ItemForm, UploadDialog, ItemDetail, Filters…
   screens/             — Гардероб, Сбор образа, Что надеть?, Образы, Настройки
 ```
 
 ## Не входит в MVP
 
-Примерка на фото реального человека, внешние AI/try-on API, аккаунты и облачная синхронизация.
+Примерка на фото реального человека, внешние AI/try-on API.

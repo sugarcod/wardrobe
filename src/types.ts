@@ -24,6 +24,10 @@ export interface Item {
   occasion?: Occasion;
   imageDataUrl: string;
   createdAt: string;
+  /** время последнего изменения (для синхронизации, last-write-wins) */
+  updatedAt?: string;
+  /** версия картинки — меняется при замене фото */
+  imageRev?: string;
 }
 
 export interface Layer {
@@ -42,6 +46,14 @@ export interface Outfit {
   createdAt: string;
   updatedAt?: string;
   layers: Layer[];
+}
+
+/** Отметка об удалении — нужна, чтобы удаление дошло до других устройств */
+export interface Tombstone {
+  key: string; // `${kind}:${id}`
+  kind: 'item' | 'outfit';
+  id: string;
+  updatedAt: string;
 }
 
 export interface Draft {

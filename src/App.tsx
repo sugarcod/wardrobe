@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { UIProvider } from './ui';
 import { StoreProvider, useStore } from './store';
+import { CloudProvider } from './cloud';
+import { AccountBadge } from './components/Account';
 import { AppCtx, useHashRoute, type Route } from './nav';
 import { UploadDialog } from './components/UploadDialog';
 import { ItemDetail } from './components/ItemDetail';
@@ -76,6 +78,7 @@ function Shell() {
               </button>
             ))}
           </nav>
+          <AccountBadge />
         </header>
 
         <main className="main">
@@ -125,7 +128,9 @@ export default function App() {
   return (
     <UIProvider>
       <StoreProvider>
-        <Shell />
+        <CloudProvider>
+          <Shell />
+        </CloudProvider>
       </StoreProvider>
     </UIProvider>
   );

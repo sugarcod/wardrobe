@@ -3,12 +3,15 @@ import { useStore } from '../store';
 import { useUI } from '../ui';
 import { makeBackup, parseBackup } from '../lib/storage';
 import { estimateStorage } from '../lib/db';
+import { AccountSection } from '../components/Account';
+import { useCloud } from '../cloud';
 import { formatBytes, pluralRu } from '../lib/util';
 import type { BackupFile } from '../types';
 
 export function SettingsScreen() {
   const { items, outfits, importData, wipeAll, persisted } = useStore();
   const { toast, confirm } = useUI();
+  const { user } = useCloud();
   const fileRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<'merge' | 'replace'>('merge');
   const [est, setEst] = useState<{ usage: number; quota: number } | null | undefined>(undefined);
@@ -54,7 +57,7 @@ export function SettingsScreen() {
   };
 
   const wipe = async () => {
-    if (!(await confirm({ title: 'Удалить все данные?', text: 'Все вещи и образы будут удалены из этого браузера. Сначала сделайте резервную копию.', confirmText: 'Удалить всё', danger: true }))) return;
+    if (!(await confirm({ title: 'Удалить все данные?', text: user ? 'Все вещи и образы будут удалены на этом устройстве и в облаке (на всех ваших устройствах). Сначала сделайте резервную копию.' : 'Все вещи и образы будут удалены из этого браузера. Сначала сделайте резервную копию.', confirmText: 'Удалить всё', danger: true }))) return;
     if (await wipeAll()) toast('Данные удалены');
   };
 
@@ -63,9 +66,11 @@ export function SettingsScreen() {
       <header className="page-head">
         <div>
           <h1 className="page-title">Настройки</h1>
-          <p className="page-sub">Данные хранятся только в этом браузере. Аккаунта и облака нет.</p>
+          <p className="page-sub">{user ? 'Данные хранятся в браузере и синхронизируются с облаком.' : 'Данные хранятся в этом браузере.'}</p>
         </div>
       </header>
+
+      <AccountSection />
 
       <section className="panel settings-block">
         <h2 className="panel-title">Хранилище</h2>
@@ -99,12 +104,12 @@ export function SettingsScreen() {
 
       <section className="panel settings-block">
         <h2 className="panel-title">Очистка</h2>
-        <p className="muted">Удалить все вещи и образы из этого браузера.</p>
+        <p className="muted">{user ? 'Удалить все вещи и образы — здесь и в облаке.' : 'Удалить все вещи и образы из этого браузера.'}</p>
         <button className="btn btn-danger-ghost" onClick={wipe} disabled={!items.length && !outfits.length}>Удалить все данные</button>
       </section>
 
       <section className="settings-about muted small">
-        <p>Цифровой гардероб · MVP. Фото обрабатываются только на вашем устройстве и никуда не отправляются.</p>
+        <p>Цифровой гардероб · MVP. Фото обрабатываются на вашем устройстве; в облако (Firebase) они попадают, только если вы вошли в аккаунт.</p>
       </section>
     </div>
   );

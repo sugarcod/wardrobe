@@ -203,3 +203,28 @@ export function canvasToDataUrl(c: HTMLCanvasElement): string {
   }
   return webpSupported ? c.toDataURL('image/webp', 0.86) : c.toDataURL('image/png');
 }
+
+/**
+ * Ужимает картинку, пока data URL не станет короче maxChars
+ * (для документа Firestore, лимит документа — 1 МиБ). Результат — WebP, если браузер умеет.
+ */
+export async function fitDataUrl(dataUrl: string, maxChars = 700_000): Promise<string> {
+  const isWebp = dataUrl.startsWith('data:image/webp');
+  if (dataUrl.length <= maxChars && (isWebp || webpSupported === false)) return dataUrl;
+  let c = await dataUrlToCanvas(dataUrl);
+  canvasToDataUrl(c); // определить поддержку WebP
+  const encode = (q: number) => (webpSupported ? c.toDataURL('image/webp', q) : c.toDataURL('image/png'));
+  let out = encode(0.86);
+  for (let i = 0; i < 12 && out.length > maxChars; i++) {
+    const q = [0.78, 0.7, 0.6][i] ?? 0;
+    if (q && webpSupported) {
+      out = encode(q);
+      continue;
+    }
+    const s = makeCanvas(c.width * 0.8, c.height * 0.8);
+    ctx2d(s).drawImage(c, 0, 0, s.width, s.height);
+    c = s;
+    out = encode(0.7);
+  }
+  return out;
+}

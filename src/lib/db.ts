@@ -1,5 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
-import type { Item, Outfit } from '../types';
+import type { Item, Outfit, Tombstone } from '../types';
 
 /** Метаданные вещи без картинки — сама картинка лежит отдельно как Blob */
 export type ItemMeta = Omit<Item, 'imageDataUrl'>;
@@ -8,6 +8,7 @@ interface WardrobeDB extends DBSchema {
   items: { key: string; value: ItemMeta };
   images: { key: string; value: Blob };
   outfits: { key: string; value: Outfit };
+  tombstones: { key: string; value: Tombstone };
 }
 
 export class StorageFullError extends Error {
@@ -32,11 +33,14 @@ async function settle(ops: Promise<unknown>[], done: Promise<void>) {
 let dbp: Promise<IDBPDatabase<WardrobeDB>> | null = null;
 function db() {
   if (!dbp) {
-    dbp = openDB<WardrobeDB>('wardrobe', 1, {
-      upgrade(d) {
-        d.createObjectStore('items', { keyPath: 'id' });
-        d.createObjectStore('images');
-        d.createObjectStore('outfits', { keyPath: 'id' });
+    dbp = openDB<WardrobeDB>('wardrobe', 2, {
+      upgrade(d, oldVersion) {
+        if (oldVersion < 1) {
+          d.createObjectStore('items', { keyPath: 'id' });
+          d.createObjectStore('images');
+          d.createObjectStore('outfits', { keyPath: 'id' });
+        }
+        if (oldVersion < 2) d.createObjectStore('tombstones', { keyPath: 'key' });
       },
     });
   }
@@ -102,10 +106,11 @@ export const idb = {
   async putItems(items: Item[], imageBlobs: Map<string, Blob>) {
     await guard(async () => {
       const d = await db();
-      const tx = d.transaction(['items', 'images'], 'readwrite');
+      const tx = d.transaction(['items', 'images', 'tombstones'], 'readwrite');
       const ops: Promise<unknown>[] = [];
       for (const it of items) {
         ops.push(tx.objectStore('items').put(stripImage(it)));
+        ops.push(tx.objectStore('tombstones').delete(`item:${it.id}`));
         const b = imageBlobs.get(it.id);
         if (b) ops.push(tx.objectStore('images').put(b, it.id));
       }
@@ -113,28 +118,47 @@ export const idb = {
     });
   },
 
-  async deleteItem(id: string) {
+  /** удаляет вещь; tombstone (если передан) сохраняется для синхронизации */
+  async deleteItem(id: string, tomb?: Tombstone) {
     const d = await db();
-    const tx = d.transaction(['items', 'images'], 'readwrite');
-    await settle([tx.objectStore('items').delete(id), tx.objectStore('images').delete(id)], tx.done);
+    const tx = d.transaction(['items', 'images', 'tombstones'], 'readwrite');
+    const ops: Promise<unknown>[] = [tx.objectStore('items').delete(id), tx.objectStore('images').delete(id)];
+    if (tomb) ops.push(tx.objectStore('tombstones').put(tomb));
+    await settle(ops, tx.done);
   },
 
   async putOutfit(o: Outfit) {
-    await guard(async () => (await db()).put('outfits', o));
+    await guard(async () => {
+      const d = await db();
+      const tx = d.transaction(['outfits', 'tombstones'], 'readwrite');
+      await settle([tx.objectStore('outfits').put(o), tx.objectStore('tombstones').delete(`outfit:${o.id}`)], tx.done);
+    });
   },
 
-  async deleteOutfit(id: string) {
-    await (await db()).delete('outfits', id);
+  async deleteOutfit(id: string, tomb?: Tombstone) {
+    const d = await db();
+    const tx = d.transaction(['outfits', 'tombstones'], 'readwrite');
+    const ops: Promise<unknown>[] = [tx.objectStore('outfits').delete(id)];
+    if (tomb) ops.push(tx.objectStore('tombstones').put(tomb));
+    await settle(ops, tx.done);
+  },
+
+  async getTombstones(): Promise<Tombstone[]> {
+    return (await db()).getAll('tombstones');
+  },
+
+  async clearTombstones() {
+    await (await db()).clear('tombstones');
   },
 
   /** Полная замена данных (импорт «заменить всё», очистка) */
   async replaceAll(items: { meta: ItemMeta; blob: Blob }[], outfits: Outfit[], clear: boolean) {
     await guard(async () => {
       const d = await db();
-      const tx = d.transaction(['items', 'images', 'outfits'], 'readwrite');
+      const tx = d.transaction(['items', 'images', 'outfits', 'tombstones'], 'readwrite');
       const ops: Promise<unknown>[] = [];
       if (clear) {
-        ops.push(tx.objectStore('items').clear(), tx.objectStore('images').clear(), tx.objectStore('outfits').clear());
+        ops.push(tx.objectStore('items').clear(), tx.objectStore('images').clear(), tx.objectStore('outfits').clear(), tx.objectStore('tombstones').clear());
       }
       for (const { meta, blob } of items) {
         ops.push(tx.objectStore('items').put(meta), tx.objectStore('images').put(blob, meta.id));

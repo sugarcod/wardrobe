@@ -412,3 +412,26 @@ button.swatch:hover { transform: scale(1.08); }
 }
 
 .boot { min-height: 100vh; display: grid; place-items: center; text-align: center; padding: 24px; }
+
+/* ---------- account / sync ---------- */
+.topbar .nav { margin-left: auto; }
+.account-signin, .account-badge { margin-left: 14px; flex: none; }
+.account-badge { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 3px 4px 3px 12px; font-size: 12px; color: var(--ink-2); }
+.account-badge:hover { border-color: var(--line-2); }
+.avatar { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex: none; }
+.avatar-letter { display: inline-grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 14px; }
+.sync-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; background: var(--muted); }
+.sync-synced { background: var(--ok); }
+.sync-syncing { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.sync-offline { background: #b9b2a9; }
+.sync-error { background: var(--danger); }
+@keyframes pulse { 50% { opacity: 0.35; } }
+.account-row { display: flex; align-items: center; gap: 14px; margin: 10px 0 4px; flex-wrap: wrap; }
+.account-info { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.sync-pill { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; padding: 4px 12px; border-radius: 999px; background: var(--surface-2); }
+.modal-actions-stack { flex-direction: column; align-items: stretch; }
+@media (max-width: 900px) {
+  .account-status, .account-signin-text { display: none; }
+  .account-signin { padding: 0 10px; }
+  .account-badge { padding: 3px; }
+}
