@@ -45,7 +45,8 @@ export function ItemDetail({ item, onClose, onWear }: Props) {
     }
   };
 
-  const save = () => {
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
     if (!fields.category) return toast('Выберите категорию.', 'error');
     const next: Item = {
       ...item,
@@ -58,7 +59,10 @@ export function ItemDetail({ item, onClose, onWear }: Props) {
     };
     if (fields.occasion) next.occasion = fields.occasion;
     else delete next.occasion;
-    if (updateItem(next)) {
+    setBusy(true);
+    const ok = await updateItem(next);
+    setBusy(false);
+    if (ok) {
       toast('Изменения сохранены', 'success');
       onClose();
     }
@@ -75,7 +79,7 @@ export function ItemDetail({ item, onClose, onWear }: Props) {
       danger: true,
     });
     if (ok) {
-      deleteItem(item.id);
+      await deleteItem(item.id);
       toast('Вещь удалена');
       onClose();
     }
@@ -108,7 +112,7 @@ export function ItemDetail({ item, onClose, onWear }: Props) {
         <button className="btn btn-danger-ghost" onClick={remove}>Удалить</button>
         <span className="spacer" />
         <button className="btn btn-ghost" onClick={onClose}>Отмена</button>
-        <button className="btn btn-primary" onClick={save}>Сохранить</button>
+        <button className="btn btn-primary" disabled={busy} onClick={save}>Сохранить</button>
       </div>
     </Modal>
   );

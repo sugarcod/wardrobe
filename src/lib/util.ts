@@ -14,7 +14,8 @@ export function formatDate(iso: string): string {
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} Б`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} КБ`;
-  return `${(n / 1024 / 1024).toFixed(1)} МБ`;
+  if (n < 1024 ** 3) return `${(n / 1024 / 1024).toFixed(1)} МБ`;
+  return `${(n / 1024 ** 3).toFixed(1)} ГБ`;
 }
 
 export function clamp(v: number, min: number, max: number) {

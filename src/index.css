@@ -410,3 +410,5 @@ button.swatch:hover { transform: scale(1.08); }
   .outfit-grid { grid-template-columns: repeat(2, 1fr); gap: 14px; }
   .toasts { bottom: 86px; }
 }
+
+.boot { min-height: 100vh; display: grid; place-items: center; text-align: center; padding: 24px; }

@@ -18,7 +18,7 @@ export function OutfitsScreen() {
 
   const remove = async (o: Outfit) => {
     if (await confirm({ title: `Удалить образ «${o.name}»?`, text: 'Вещи останутся в гардеробе.', confirmText: 'Удалить', danger: true })) {
-      deleteOutfit(o.id);
+      await deleteOutfit(o.id);
       toast('Образ удалён');
     }
   };

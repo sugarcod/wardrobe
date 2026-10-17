@@ -1,17 +1,10 @@
 import type { BackupFile, Draft, Item, Outfit, Prefs } from '../types';
+import { blobToDataUrl, dataUrlToBlob, idb, itemsFromDataUrls } from './db';
 
-const K = {
-  items: 'wardrobe.items.v1',
-  outfits: 'wardrobe.outfits.v1',
-  draft: 'wardrobe.draft.v1',
-  prefs: 'wardrobe.prefs.v1',
-};
+/** Ключи старой версии (localStorage) — переносятся в IndexedDB при первом запуске */
+export const LEGACY_KEYS = { items: 'wardrobe.items.v1', outfits: 'wardrobe.outfits.v1' };
 
-export class StorageFullError extends Error {
-  constructor() {
-    super('Хранилище браузера заполнено');
-  }
-}
+const K = { draft: 'wardrobe.draft.v1', prefs: 'wardrobe.prefs.v1' };
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -22,45 +15,53 @@ function read<T>(key: string, fallback: T): T {
   }
 }
 
-function isQuota(e: unknown) {
-  return (
-    e instanceof DOMException &&
-    (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014)
-  );
-}
-
 function write(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch (e) {
-    if (isQuota(e)) throw new StorageFullError();
-    throw e;
+  } catch {
+    /* черновик и настройки не критичны */
   }
 }
 
-export const storage = {
-  loadItems: () => read<Item[]>(K.items, []),
-  loadOutfits: () => read<Outfit[]>(K.outfits, []),
+/** Небольшие данные (черновик образа и настройки) остаются в localStorage */
+export const local = {
   loadDraft: () => read<Draft>(K.draft, { layers: [], editingId: null }),
   loadPrefs: () => read<Prefs>(K.prefs, { sceneDark: false }),
-  saveItems: (v: Item[]) => write(K.items, v),
-  saveOutfits: (v: Outfit[]) => write(K.outfits, v),
-  saveDraft: (v: Draft) => {
-    try { write(K.draft, v); } catch { /* черновик не критичен */ }
-  },
-  savePrefs: (v: Prefs) => {
-    try { write(K.prefs, v); } catch { /* ignore */ }
-  },
-  clearAll: () => Object.values(K).forEach((k) => localStorage.removeItem(k)),
-  usageBytes(): number {
-    let n = 0;
-    for (const k of Object.values(K)) n += (localStorage.getItem(k)?.length ?? 0) * 2;
-    return n;
-  },
+  saveDraft: (v: Draft) => write(K.draft, v),
+  savePrefs: (v: Prefs) => write(K.prefs, v),
 };
 
-export function makeBackup(items: Item[], outfits: Outfit[]): BackupFile {
-  return { app: 'wardrobe', version: 1, exportedAt: new Date().toISOString(), items, outfits };
+/**
+ * Переносит вещи и образы из localStorage в IndexedDB.
+ * Старые ключи удаляются только после успешной записи.
+ */
+export async function migrateFromLocalStorage(): Promise<number> {
+  const rawItems = localStorage.getItem(LEGACY_KEYS.items);
+  const rawOutfits = localStorage.getItem(LEGACY_KEYS.outfits);
+  if (rawItems === null && rawOutfits === null) return 0;
+  let items: Item[] = [];
+  let outfits: Outfit[] = [];
+  try {
+    items = rawItems ? (JSON.parse(rawItems) as Item[]) : [];
+    outfits = rawOutfits ? (JSON.parse(rawOutfits) as Outfit[]) : [];
+  } catch {
+    /* повреждённые данные — нечего переносить */
+  }
+  const valid = items.filter((i) => i && typeof i.id === 'string' && typeof i.imageDataUrl === 'string');
+  const records = await itemsFromDataUrls(valid);
+  await idb.replaceAll(records, Array.isArray(outfits) ? outfits.filter((o) => o && o.id) : [], false);
+  localStorage.removeItem(LEGACY_KEYS.items);
+  localStorage.removeItem(LEGACY_KEYS.outfits);
+  return records.length;
+}
+
+export async function makeBackup(items: Item[], outfits: Outfit[]): Promise<BackupFile> {
+  const withData: Item[] = [];
+  for (const it of items) {
+    const url = it.imageDataUrl.startsWith('data:') ? it.imageDataUrl : await blobToDataUrl(await dataUrlToBlob(it.imageDataUrl));
+    withData.push({ ...it, imageDataUrl: url });
+  }
+  return { app: 'wardrobe', version: 1, exportedAt: new Date().toISOString(), items: withData, outfits };
 }
 
 export function parseBackup(text: string): BackupFile {
@@ -74,9 +75,9 @@ export function parseBackup(text: string): BackupFile {
   if (!d || !Array.isArray(d.items) || !Array.isArray(d.outfits)) {
     throw new Error('В файле нет вещей и образов гардероба.');
   }
-  const items = d.items.filter(
-    (i): i is Item => !!i && typeof i.id === 'string' && typeof i.imageDataUrl === 'string' && typeof i.category === 'string',
-  ).map((i) => ({ ...i, tags: Array.isArray(i.tags) ? i.tags : [], season: i.season ?? 'all', color: i.color ?? '', name: i.name ?? '' }));
+  const items = d.items
+    .filter((i): i is Item => !!i && typeof i.id === 'string' && typeof i.imageDataUrl === 'string' && i.imageDataUrl.startsWith('data:image/') && typeof i.category === 'string')
+    .map((i) => ({ ...i, tags: Array.isArray(i.tags) ? i.tags : [], season: i.season ?? 'all', color: i.color ?? '', name: i.name ?? '' }));
   const outfits = d.outfits.filter((o): o is Outfit => !!o && typeof o.id === 'string' && Array.isArray(o.layers));
   return { app: 'wardrobe', version: 1, exportedAt: d.exportedAt ?? '', items, outfits };
 }

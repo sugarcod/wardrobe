@@ -205,8 +205,8 @@ export function BuilderScreen() {
           itemsCount={layers.length}
           names={wornItems.map(itemTitle)}
           onClose={() => setSaving(false)}
-          onSave={(name, asNew) => {
-            const o = saveOutfit(name, asNew);
+          onSave={async (name, asNew) => {
+            const o = await saveOutfit(name, asNew);
             if (o) {
               toast(`Образ «${o.name}» сохранён`, 'success');
               setSaving(false);

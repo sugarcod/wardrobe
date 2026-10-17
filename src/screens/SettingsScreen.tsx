@@ -1,22 +1,34 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { useUI } from '../ui';
-import { makeBackup, parseBackup, storage } from '../lib/storage';
+import { makeBackup, parseBackup } from '../lib/storage';
+import { estimateStorage } from '../lib/db';
 import { formatBytes, pluralRu } from '../lib/util';
 import type { BackupFile } from '../types';
 
-const APPROX_LIMIT = 5 * 1024 * 1024 * 2; // ~5 млн символов UTF-16
-
 export function SettingsScreen() {
-  const { items, outfits, replaceAll } = useStore();
+  const { items, outfits, importData, wipeAll, persisted } = useStore();
   const { toast, confirm } = useUI();
   const fileRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<'merge' | 'replace'>('merge');
-  const used = storage.usageBytes();
-  const pct = Math.min(100, Math.round((used / APPROX_LIMIT) * 100));
+  const [est, setEst] = useState<{ usage: number; quota: number } | null | undefined>(undefined);
+  const [exporting, setExporting] = useState(false);
+  useEffect(() => {
+    estimateStorage().then(setEst);
+  }, [items, outfits]);
+  const pct = est && est.quota ? Math.min(100, Math.max(1, Math.round((est.usage / est.quota) * 100))) : 0;
 
-  const exportJson = () => {
-    const blob = new Blob([JSON.stringify(makeBackup(items, outfits))], { type: 'application/json' });
+  const exportJson = async () => {
+    setExporting(true);
+    let backup;
+    try {
+      backup = await makeBackup(items, outfits);
+    } catch {
+      setExporting(false);
+      return toast('Не удалось подготовить копию.', 'error');
+    }
+    setExporting(false);
+    const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `garderob-${new Date().toISOString().slice(0, 10)}.json`;
@@ -35,19 +47,15 @@ export function SettingsScreen() {
     const summary = `${data.items.length} ${pluralRu(data.items.length, 'вещь', 'вещи', 'вещей')} и ${data.outfits.length} ${pluralRu(data.outfits.length, 'образ', 'образа', 'образов')}`;
     if (mode === 'replace') {
       if (!(await confirm({ title: 'Заменить все данные?', text: `Текущий гардероб будет заменён: ${summary}.`, confirmText: 'Заменить', danger: true }))) return;
-      if (replaceAll(data.items, data.outfits)) toast(`Импортировано: ${summary}`, 'success');
+      if (await importData(data.items, data.outfits, true)) toast(`Импортировано: ${summary}`, 'success');
     } else {
-      const ids = new Set(data.items.map((i) => i.id));
-      const oids = new Set(data.outfits.map((o) => o.id));
-      const mergedItems = [...data.items, ...items.filter((i) => !ids.has(i.id))];
-      const mergedOutfits = [...data.outfits, ...outfits.filter((o) => !oids.has(o.id))];
-      if (replaceAll(mergedItems, mergedOutfits)) toast(`Добавлено из копии: ${summary}`, 'success');
+      if (await importData(data.items, data.outfits, false)) toast(`Добавлено из копии: ${summary}`, 'success');
     }
   };
 
   const wipe = async () => {
     if (!(await confirm({ title: 'Удалить все данные?', text: 'Все вещи и образы будут удалены из этого браузера. Сначала сделайте резервную копию.', confirmText: 'Удалить всё', danger: true }))) return;
-    if (replaceAll([], [])) toast('Данные удалены');
+    if (await wipeAll()) toast('Данные удалены');
   };
 
   return (
@@ -62,17 +70,22 @@ export function SettingsScreen() {
       <section className="panel settings-block">
         <h2 className="panel-title">Хранилище</h2>
         <p className="muted">
-          {items.length} {pluralRu(items.length, 'вещь', 'вещи', 'вещей')}, {outfits.length} {pluralRu(outfits.length, 'образ', 'образа', 'образов')} · занято примерно {formatBytes(used)}
+          {items.length} {pluralRu(items.length, 'вещь', 'вещи', 'вещей')}, {outfits.length} {pluralRu(outfits.length, 'образ', 'образа', 'образов')}
+          {est ? <> · занято {formatBytes(est.usage)} из доступных {formatBytes(est.quota)}</> : est === null ? ' · браузер не сообщает объём' : ''}
         </p>
-        <div className="meter"><div style={{ width: `${pct}%` }} /></div>
-        <p className="muted small">Обычно браузер даёт около 5 МБ на сайт. Фото уменьшаются до 1200 px и сжимаются, но при большом гардеробе место может закончиться.</p>
+        {est && <div className="meter" data-testid="storage-meter"><div style={{ width: `${pct}%` }} /></div>}
+        <p className="muted small">
+          Вещи и образы хранятся в IndexedDB этого браузера — места хватит на сотни вещей.{' '}
+          {persisted === true && 'Браузер пометил данные как постоянные и не удалит их при нехватке места.'}
+          {persisted === false && 'Браузер не разрешил постоянное хранение — при острой нехватке места данные могут быть удалены, поэтому делайте резервные копии.'}
+        </p>
       </section>
 
       <section className="panel settings-block">
         <h2 className="panel-title">Резервная копия</h2>
         <p className="muted">Сохраните все вещи и образы в файл JSON, чтобы перенести на другое устройство или не потерять при очистке браузера.</p>
         <div className="row-gap">
-          <button className="btn btn-primary" onClick={exportJson} disabled={!items.length && !outfits.length}>Скачать копию (JSON)</button>
+          <button className="btn btn-primary" onClick={exportJson} disabled={exporting || (!items.length && !outfits.length)}>{exporting ? 'Готовим файл…' : 'Скачать копию (JSON)'}</button>
         </div>
         <div className="row-gap">
           <div className="seg">

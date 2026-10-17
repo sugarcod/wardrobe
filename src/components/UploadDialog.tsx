@@ -67,7 +67,8 @@ export function UploadDialog({ files, onClose }: { files: File[]; onClose: () =>
   const ready = drafts.filter((d) => d.status === 'ready');
   const loading = drafts.some((d) => d.status === 'loading');
 
-  const save = () => {
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
     if (ready.some((d) => !d.fields.category)) {
       setShowErrors(true);
       toast('У каждой вещи должна быть категория.', 'error');
@@ -85,7 +86,10 @@ export function UploadDialog({ files, onClose }: { files: File[]; onClose: () =>
       imageDataUrl: d.dataUrl!,
       createdAt: new Date(base + (ready.length - i)).toISOString(),
     }));
-    if (addItems(items)) {
+    setSaving(true);
+    const ok = await addItems(items);
+    setSaving(false);
+    if (ok) {
       toast(`Добавлено: ${items.length} ${pluralRu(items.length, 'вещь', 'вещи', 'вещей')}`, 'success');
       onClose();
     }
@@ -139,7 +143,7 @@ export function UploadDialog({ files, onClose }: { files: File[]; onClose: () =>
       </div>
       <div className="modal-actions sticky-actions">
         <button className="btn btn-ghost" onClick={onClose}>Отмена</button>
-        <button className="btn btn-primary" disabled={!ready.length || loading} onClick={save}>
+        <button className="btn btn-primary" disabled={!ready.length || loading || saving} onClick={save}>
           {loading ? 'Обработка…' : `Сохранить ${ready.length ? ready.length : ''} ${pluralRu(ready.length, 'вещь', 'вещи', 'вещей')}`}
         </button>
       </div>
