@@ -8,12 +8,12 @@
  * Если конфиг не заполнен, приложение работает только локально, а кнопка «Войти через Google» скрыта.
  */
 export const MANUAL_CONFIG = {
-  apiKey: '',
-  authDomain: '',
-  projectId: '',
-  appId: '',
-  storageBucket: '',
-  messagingSenderId: '',
+  apiKey: 'AIzaSyArHzeFwSfLKoZ2EuT-o2Z4g19suCfm2NY',
+  authDomain: 'wardrobe-sugarcode.firebaseapp.com',
+  projectId: 'wardrobe-sugarcode',
+  appId: '1:719535705770:web:c8c5ad7478e9172b644ad3',
+  storageBucket: 'wardrobe-sugarcode.firebasestorage.app',
+  messagingSenderId: '719535705770',
 };
 
 const env = import.meta.env;
