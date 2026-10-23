@@ -4,9 +4,16 @@ import { levelOf, slotOf } from '../catalog';
 import type { Category, Item, Layer, Occasion, Season } from '../types';
 import { colorLabel, isNeutral } from './colors';
 
-export function newLayer(itemId: string, x = 0, y = 0): Layer {
-  return { itemId, x, y, scale: 1, flip: false };
+export function newLayer(itemId: string, x = 0, y = 0, scale = 1): Layer {
+  return { itemId, x, y, scale, flip: false };
 }
+
+/** Пределы масштаба вещи на манекене и в ячейках */
+export const SCALE_MIN = 0.3;
+export const SCALE_MAX = 2.5;
+export const clampScale = (s: number) => Math.round(Math.min(SCALE_MAX, Math.max(SCALE_MIN, s)) * 100) / 100;
+/** шаг кнопок «+»/«−»: 10% */
+export const stepScale = (s: number, dir: 1 | -1) => clampScale(Math.round(s * 10 + dir) / 10);
 
 /** Сортировка слоёв снизу вверх по порядку зон; внутри зоны — порядок надевания */
 export function sortLayers(layers: Layer[], items: Map<string, Item>): Layer[] {
@@ -48,7 +55,7 @@ export function wear(layers: Layer[], item: Item, items: Map<string, Item>): Lay
   }
   // в стеке каждая следующая вещь чуть смещена, чтобы были видны все
   const n = kept.filter((l) => slotOf(items.get(l.itemId)!).slot === info.slot).length;
-  const layer = newLayer(item.id, (info.stepX ?? 0) * n, (info.stepY ?? 0) * n);
+  const layer = newLayer(item.id, (info.stepX ?? 0) * n, (info.stepY ?? 0) * n, clampScale(item.defaultScale ?? 1));
   return sortLayers([...kept, layer], items);
 }
 

@@ -2,6 +2,8 @@ import { useRef, useState } from 'react';
 import { Modal } from './Modal';
 import { ItemForm, type ItemFields } from './ItemForm';
 import { BgFixer } from './BgFixer';
+import { ZoomViewer } from './ZoomViewer';
+import { SCALE_MAX, SCALE_MIN, clampScale, stepScale } from '../lib/outfit';
 import { validateFile } from '../lib/image';
 import { processFile, type Processed } from '../lib/process';
 import { CATEGORY_BY_ID } from '../constants';
@@ -17,7 +19,7 @@ interface Props {
 }
 
 export function ItemDetail({ item, onClose, onWear }: Props) {
-  const { updateItem, deleteItem, outfits, draft, wearStats } = useStore();
+  const { updateItem, deleteItem, outfits, draft, wearStats, updateLayer } = useStore();
   const stat = wearStats.get(item.id);
   const { toast, confirm } = useUI();
   const [fields, setFields] = useState<ItemFields>({
@@ -30,6 +32,7 @@ export function ItemDetail({ item, onClose, onWear }: Props) {
     tags: item.tags,
   });
   const [image, setImage] = useState(item.imageDataUrl);
+  const [defScale, setDefScale] = useState(item.defaultScale ?? 1);
   const [replacement, setReplacement] = useState<Processed | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const worn = draft.layers.some((l) => l.itemId === item.id);
@@ -61,12 +64,18 @@ export function ItemDetail({ item, onClose, onWear }: Props) {
       imageDataUrl: image,
     };
     if (!next.subtype) delete next.subtype;
+    if (defScale !== 1) next.defaultScale = clampScale(defScale);
+    else delete next.defaultScale;
     if (fields.occasion) next.occasion = fields.occasion;
     else delete next.occasion;
     setBusy(true);
     const ok = await updateItem(next);
     setBusy(false);
     if (ok) {
+      // новый размер по умолчанию сразу применяется к вещи на манекене
+      const prev = item.defaultScale ?? 1;
+      const onDraft = draft.layers.find((l) => l.itemId === item.id);
+      if (onDraft && defScale !== prev && Math.abs(onDraft.scale - prev) < 0.005) updateLayer(item.id, { scale: clampScale(defScale) });
       toast('Изменения сохранены', 'success');
       onClose();
     }
@@ -93,8 +102,13 @@ export function ItemDetail({ item, onClose, onWear }: Props) {
     <Modal title={item.name || CATEGORY_BY_ID[item.category].label} size="lg" onClose={onClose}>
       <div className="detail">
         <div className="detail-media">
-          <div className="checker detail-preview">
-            <img src={image} alt={item.name} />
+          <ZoomViewer key={image.length} src={image} alt={item.name} className="checker detail-preview" />
+          <div className="range-row zoom-row default-scale" data-testid="default-scale">
+            <span title="С этим размером вещь надевается на манекен">Размер на манекене</span>
+            <button type="button" className="zoom-btn zoom-btn-sm" aria-label="Меньше на манекене" disabled={defScale <= SCALE_MIN} onClick={() => setDefScale(stepScale(defScale, -1))}>−</button>
+            <input type="range" min={SCALE_MIN} max={SCALE_MAX} step={0.05} value={defScale} aria-label="Размер на манекене" onChange={(e) => setDefScale(clampScale(Number(e.target.value)))} />
+            <button type="button" className="zoom-btn zoom-btn-sm" aria-label="Больше на манекене" disabled={defScale >= SCALE_MAX} onClick={() => setDefScale(stepScale(defScale, 1))}>+</button>
+            <button type="button" className="link-btn small zoom-val" title="Вернуть 100%" onClick={() => setDefScale(1)} data-testid="default-scale-val">{Math.round(defScale * 100)}%</button>
           </div>
           <div className="detail-media-actions">
             <button className="btn btn-ghost btn-sm" onClick={() => fileRef.current?.click()}>Заменить фото</button>

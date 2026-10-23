@@ -30,6 +30,8 @@ export interface Item {
   imageRev?: string;
   /** подтип: футболка, свитер, рюкзак, часы… (см. catalog.ts) */
   subtype?: string;
+  /** размер на манекене по умолчанию (1 = 100%) — с ним вещь надевается */
+  defaultScale?: number;
 }
 
 export interface Layer {

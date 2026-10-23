@@ -13,12 +13,13 @@ import { useStore } from '../store';
 import { useApp } from '../nav';
 import { useUI } from '../ui';
 import { clamp, formatDate, normalizeText } from '../lib/util';
+import { SCALE_MAX, SCALE_MIN, clampScale, stepScale } from '../lib/outfit';
 import { colorLabel } from '../lib/colors';
-import type { Category } from '../types';
+import type { Category, Item } from '../types';
 import { PlusIcon } from './WardrobeScreen';
 
 export function BuilderScreen() {
-  const { items, itemsById, draft, outfits, prefs, setPrefs, wearItem, updateLayer, removeLayer, clearDraft, saveOutfit, setDraftPerfumes } = useStore();
+  const { items, itemsById, draft, outfits, prefs, setPrefs, wearItem, updateLayer, updateItem, removeLayer, clearDraft, saveOutfit, setDraftPerfumes } = useStore();
   const { pickFiles, navigate, recordDiary } = useApp();
   const [pickPerfume, setPickPerfume] = useState(false);
   const { toast, confirm } = useUI();
@@ -32,6 +33,9 @@ export function BuilderScreen() {
   const layers = draft.layers;
   const wornItems = layers.map((l) => itemsById.get(l.itemId)!).filter(Boolean);
   const sel = layers.find((l) => l.itemId === selected);
+  const selItem = sel ? itemsById.get(sel.itemId) : undefined;
+  const selOnBody = !!selItem && placementOf(selItem) === 'body';
+  const setScale = (id: string, scale: number) => updateLayer(id, { scale: clampScale(scale) });
   const hideAcc = !!prefs.hideAccessories;
   const hideOuter = !!prefs.hideOuter;
 
@@ -54,8 +58,10 @@ export function BuilderScreen() {
       const t = e.target as HTMLElement;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
       const step = e.shiftKey ? 0.02 : 0.005;
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); updateLayer(sel.itemId, { scale: stepScale(sel.scale, 1) }); return; }
+      if (e.key === '-' || e.key === '_') { e.preventDefault(); updateLayer(sel.itemId, { scale: stepScale(sel.scale, -1) }); return; }
       const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
-      if (d) {
+      if (d && selOnBody) {
         e.preventDefault();
         updateLayer(sel.itemId, { x: clamp(sel.x + d[0], -MAX_OFFSET, MAX_OFFSET), y: clamp(sel.y + d[1], -MAX_OFFSET, MAX_OFFSET) });
       }
@@ -63,7 +69,7 @@ export function BuilderScreen() {
     };
     window.addEventListener('keydown', on);
     return () => window.removeEventListener('keydown', on);
-  }, [sel, updateLayer, removeLayer]);
+  }, [sel, selOnBody, updateLayer, removeLayer]);
 
   const nudge = (dx: number, dy: number) =>
     sel && updateLayer(sel.itemId, { x: clamp(sel.x + dx, -MAX_OFFSET, MAX_OFFSET), y: clamp(sel.y + dy, -MAX_OFFSET, MAX_OFFSET) });
@@ -92,7 +98,7 @@ export function BuilderScreen() {
             <input className="input input-sm builder-search" placeholder="Поиск" value={q} onChange={(e) => setQ(e.target.value)} />
             <div className="builder-items">
               {list.map((it) => (
-                <ItemCard key={it.id} item={it} compact active={worn.has(it.id)} onClick={() => { wearItem(it); setSelected(worn.has(it.id) || placementOf(it) !== 'body' ? null : it.id); }} />
+                <ItemCard key={it.id} item={it} compact active={worn.has(it.id)} onClick={() => { wearItem(it); setSelected(worn.has(it.id) ? null : it.id); }} />
               ))}
               {!list.length && <p className="muted small pad">Ничего не нашлось</p>}
             </div>
@@ -146,6 +152,9 @@ export function BuilderScreen() {
             showOuter={!hideOuter}
             onRemove={removeLayer}
             onRemovePerfume={(id) => setDraftPerfumes((draft.perfumeIds ?? []).filter((x) => x !== id))}
+            selectedId={selected}
+            onSelect={setSelected}
+            onScale={setScale}
             stage={
               <Stage
                 layers={layers}
@@ -155,16 +164,26 @@ export function BuilderScreen() {
                 selectedId={selected}
                 onSelect={setSelected}
                 onMove={(id, x, y) => updateLayer(id, { x, y })}
+                onScale={setScale}
               />
             }
           />
+          {sel && selItem && (
+            <div className="zoom-bar" data-testid="zoom-bar" role="group" aria-label="Размер вещи">
+              <span className="zoom-bar-name">{itemTitle(selItem)}</span>
+              <button className="zoom-btn" aria-label="Уменьшить" title="Уменьшить (−)" disabled={sel.scale <= SCALE_MIN} onClick={() => setScale(sel.itemId, stepScale(sel.scale, -1))} data-testid="zoom-out">−</button>
+              <button className="zoom-pct" title="Вернуть 100%" onClick={() => setScale(sel.itemId, 1)} data-testid="zoom-reset">{Math.round(sel.scale * 100)}%</button>
+              <button className="zoom-btn" aria-label="Увеличить" title="Увеличить (+)" disabled={sel.scale >= SCALE_MAX} onClick={() => setScale(sel.itemId, stepScale(sel.scale, 1))} data-testid="zoom-in">+</button>
+              <button className="zoom-close" aria-label="Готово" title="Готово" onClick={() => setSelected(null)}>✓</button>
+            </div>
+          )}
           {!layers.length && (
             <div className="stage-hint">
               {items.length ? 'Нажмите на вещь в гардеробе, чтобы надеть её' : 'Сначала добавьте вещи в гардероб'}
             </div>
           )}
         </div>
-        <p className="muted small stage-help">Перетаскивайте одежду на манекене, чтобы подвинуть; стрелки — точная подстройка. Верхняя одежда и аксессуары — в ячейках рядом.</p>
+        <p className="muted small stage-help">Нажмите на вещь — появятся «−» и «+». Размер меняется и колёсиком мыши, и двумя пальцами. Одежду на манекене можно перетаскивать, стрелки — точная подстройка.</p>
       </section>
 
       <aside className="panel builder-side">
@@ -178,10 +197,10 @@ export function BuilderScreen() {
               const it = itemsById.get(l.itemId)!;
               const slot = slotOf(it);
               const onBody = placementOf(it) === 'body';
-              const isSel = onBody && selected === l.itemId;
+              const isSel = selected === l.itemId;
               return (
                 <li key={l.itemId} className={`layer ${isSel ? 'is-selected' : ''} ${l.hidden ? 'is-hidden' : ''}`} data-slot={slot.slot}>
-                  <div className={`layer-row ${onBody ? '' : 'is-static'}`} onClick={() => setSelected(onBody && !isSel ? l.itemId : null)}>
+                  <div className="layer-row" onClick={() => setSelected(!isSel ? l.itemId : null)}>
                     <div className="checker layer-thumb"><img src={it.imageDataUrl} alt="" /></div>
                     <div className="layer-info">
                       <div className="layer-name">{itemTitle(it)}</div>
@@ -207,20 +226,39 @@ export function BuilderScreen() {
                   </div>
                   {isSel && (
                     <div className="layer-controls">
-                      <label className="range-row">
+                      <div className="range-row zoom-row">
                         <span>Размер</span>
-                        <input type="range" min={0.5} max={1.6} step={0.01} value={l.scale} onChange={(e) => updateLayer(l.itemId, { scale: Number(e.target.value) })} />
-                        <span className="muted">{Math.round(l.scale * 100)}%</span>
-                      </label>
+                        <button className="zoom-btn zoom-btn-sm" aria-label="Уменьшить" onClick={() => setScale(l.itemId, stepScale(l.scale, -1))}>−</button>
+                        <input type="range" min={SCALE_MIN} max={SCALE_MAX} step={0.01} value={l.scale} aria-label="Размер" onChange={(e) => setScale(l.itemId, Number(e.target.value))} />
+                        <button className="zoom-btn zoom-btn-sm" aria-label="Увеличить" onClick={() => setScale(l.itemId, stepScale(l.scale, 1))}>+</button>
+                        <span className="muted zoom-val">{Math.round(l.scale * 100)}%</span>
+                      </div>
                       <div className="layer-btns">
                         <button className={`chip ${l.flip ? 'is-on' : ''}`} onClick={() => updateLayer(l.itemId, { flip: !l.flip })}>⇋ Отразить</button>
-                        <div className="nudge">
+                        {onBody && <div className="nudge">
                           <button aria-label="Влево" onClick={() => nudge(-0.01, 0)}>←</button>
                           <button aria-label="Вверх" onClick={() => nudge(0, -0.01)}>↑</button>
                           <button aria-label="Вниз" onClick={() => nudge(0, 0.01)}>↓</button>
                           <button aria-label="Вправо" onClick={() => nudge(0.01, 0)}>→</button>
-                        </div>
-                        <button className="link-btn small" onClick={() => updateLayer(l.itemId, { x: 0, y: 0, scale: 1, flip: false })}>Сбросить</button>
+                        </div>}
+                        <button className="link-btn small" onClick={() => updateLayer(l.itemId, { x: 0, y: 0, scale: clampScale(it.defaultScale ?? 1), flip: false })}>Сбросить</button>
+                      </div>
+                      <div className="layer-btns">
+                        {Math.abs(l.scale - (it.defaultScale ?? 1)) > 0.005 ? (
+                          <button
+                            className="link-btn small"
+                            data-testid="save-default-scale"
+                            onClick={async () => {
+                              const next: Item = { ...it, defaultScale: clampScale(l.scale) };
+                              if (next.defaultScale === 1) delete next.defaultScale;
+                              if (await updateItem(next)) toast(`Размер ${Math.round(l.scale * 100)}% — теперь по умолчанию для «${itemTitle(it)}»`, 'success');
+                            }}
+                          >
+                            Запомнить {Math.round(l.scale * 100)}% для новых образов
+                          </button>
+                        ) : (
+                          <span className="muted small">Размер по умолчанию: {Math.round((it.defaultScale ?? 1) * 100)}%</span>
+                        )}
                       </div>
                     </div>
                   )}

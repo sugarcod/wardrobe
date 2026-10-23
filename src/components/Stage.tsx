@@ -5,6 +5,8 @@ import type { Item, Layer } from '../types';
 import { Mannequin } from './Mannequin';
 import { ensureAlpha, getAlpha } from '../lib/hit';
 import { clamp } from '../lib/util';
+import { clampScale } from '../lib/outfit';
+import { dist, useWheel, wheelFactor } from '../lib/gestures';
 
 interface Props {
   layers: Layer[];
@@ -15,15 +17,21 @@ interface Props {
   onSelect?: (id: string | null) => void;
   onMove?: (itemId: string, x: number, y: number) => void;
   onMoveEnd?: () => void;
+  /** масштаб вещи: колёсико над вещью, щипок двумя пальцами */
+  onScale?: (itemId: string, scale: number) => void;
   className?: string;
   children?: React.ReactNode;
 }
 
 export const MAX_OFFSET = 0.3;
 
-export function Stage({ layers, itemsById, dark, interactive, selectedId, onSelect, onMove, onMoveEnd, className, children }: Props) {
+export function Stage({ layers, itemsById, dark, interactive, selectedId, onSelect, onMove, onMoveEnd, onScale, className, children }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const drag = useRef<{ id: string; sx: number; sy: number; x0: number; y0: number; pid: number } | null>(null);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ id: string; d0: number; s0: number } | null>(null);
+  /** промах по вещи снимает выделение только если это был не щипок */
+  const missDown = useRef(false);
 
   useEffect(() => {
     if (!interactive) return;
@@ -76,17 +84,51 @@ export function Stage({ layers, itemsById, dark, interactive, selectedId, onSele
     return null;
   };
 
+  const layerOf = (id: string | null | undefined) => (id ? visible.find((l) => l.itemId === id) : undefined);
+
+  useWheel(ref, interactive && onScale ? (e) => {
+    const hit = hitTest(e.clientX, e.clientY);
+    // колёсико над вещью; щипок на тачпаде (ctrl+wheel) — ещё и над выбранной вещью в любом месте сцены
+    const l = hit ?? (e.ctrlKey ? layerOf(selectedId) : undefined);
+    if (!l) return false;
+    if (hit && hit.itemId !== selectedId) onSelect?.(hit.itemId);
+    onScale(l.itemId, clampScale(l.scale * wheelFactor(e)));
+    return true;
+  } : null);
+
   const onPointerDown = (e: React.PointerEvent) => {
     if (!interactive) return;
-    const l = hitTest(e.clientX, e.clientY);
-    onSelect?.(l ? l.itemId : null);
-    if (l) {
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    if (pointers.current.size === 2) {
+      const target = layerOf(drag.current?.id ?? selectedId);
+      drag.current = null;
+      missDown.current = false;
+      if (target && onScale) {
+        const [a, b] = [...pointers.current.values()];
+        pinch.current = { id: target.itemId, d0: dist(a, b), s0: target.scale };
+        if (target.itemId !== selectedId) onSelect?.(target.itemId);
+      }
       e.preventDefault();
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      return;
+    }
+    if (pointers.current.size > 2) return;
+    const l = hitTest(e.clientX, e.clientY);
+    missDown.current = !l;
+    if (l) {
+      onSelect?.(l.itemId);
+      e.preventDefault();
       drag.current = { id: l.itemId, sx: e.clientX, sy: e.clientY, x0: l.x, y0: l.y, pid: e.pointerId };
     }
   };
   const onPointerMove = (e: React.PointerEvent) => {
+    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const p = pinch.current;
+    if (p && pointers.current.size >= 2) {
+      const [a, b] = [...pointers.current.values()];
+      onScale?.(p.id, clampScale((p.s0 * dist(a, b)) / p.d0));
+      return;
+    }
     const d = drag.current;
     if (!d || d.pid !== e.pointerId || !ref.current) return;
     const r = ref.current.getBoundingClientRect();
@@ -95,6 +137,15 @@ export function Stage({ layers, itemsById, dark, interactive, selectedId, onSele
     onMove?.(d.id, x, y);
   };
   const onPointerUp = (e: React.PointerEvent) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2 && pinch.current) {
+      pinch.current = null;
+      onMoveEnd?.();
+    }
+    if (missDown.current && !pointers.current.size) {
+      missDown.current = false;
+      if (e.type === 'pointerup') onSelect?.(null);
+    }
     if (drag.current?.pid === e.pointerId) {
       drag.current = null;
       onMoveEnd?.();
@@ -139,7 +190,62 @@ export function Stage({ layers, itemsById, dark, interactive, selectedId, onSele
           </div>
         );
       })}
+      {interactive && onScale && <ResizeHandle layer={layerOf(selectedId)} item={selectedId ? itemsById.get(selectedId) : undefined} stageRef={ref} onScale={onScale} onEnd={onMoveEnd} />}
       {children}
     </div>
+  );
+}
+
+/** Угол картинки вещи (в долях сцены) с учётом object-fit: contain, масштаба и отражения */
+function cornerOf(l: Layer, it: Item) {
+  const b = slotOf(it).box;
+  // сцена 1:2 — считаем в единицах ширины: W = 1, H = 2
+  const bw = b.w, bh = b.h * 2;
+  const a = getAlpha(it);
+  let dw = bw, dh = bh, ox = 0, oy = 0;
+  if (a) {
+    dh = Math.min(bh, bw / a.ar);
+    dw = dh * a.ar;
+    ox = (bw - dw) * b.px;
+    oy = (bh - dh) * b.py;
+  }
+  const cx = (b.l + l.x) + bw / 2, cy = (b.t + l.y) * 2 + bh / 2;
+  let rx = (ox + dw - bw / 2) * l.scale;
+  const ry = (oy + dh - bh / 2) * l.scale;
+  if (l.flip) rx = -rx;
+  return { x: cx + rx, y: (cy + ry) / 2, cx, cy: cy / 2 };
+}
+
+/** Уголок для пропорционального изменения размера выбранной вещи */
+function ResizeHandle({ layer, item, stageRef, onScale, onEnd }: { layer?: Layer; item?: Item; stageRef: React.RefObject<HTMLDivElement | null>; onScale: (id: string, s: number) => void; onEnd?: () => void }) {
+  const st = useRef<{ s0: number; d0: number; cx: number; cy: number; pid: number } | null>(null);
+  if (!layer || !item) return null;
+  const c = cornerOf(layer, item);
+  const center = () => {
+    const r = stageRef.current!.getBoundingClientRect();
+    return { x: r.left + c.cx * r.width, y: r.top + c.cy * r.height };
+  };
+  return (
+    <div
+      className="resize-handle"
+      data-testid="resize-handle"
+      title="Потяните, чтобы увеличить или уменьшить"
+      style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%` }}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+        const o = center();
+        st.current = { s0: layer.scale, d0: Math.hypot(e.clientX - o.x, e.clientY - o.y) || 1, cx: o.x, cy: o.y, pid: e.pointerId };
+      }}
+      onPointerMove={(e) => {
+        const d = st.current;
+        if (!d || d.pid !== e.pointerId) return;
+        e.stopPropagation();
+        onScale(layer.itemId, clampScale((d.s0 * Math.hypot(e.clientX - d.cx, e.clientY - d.cy)) / d.d0));
+      }}
+      onPointerUp={(e) => { if (st.current?.pid === e.pointerId) { st.current = null; e.stopPropagation(); onEnd?.(); } }}
+      onPointerCancel={() => { st.current = null; }}
+    />
   );
 }

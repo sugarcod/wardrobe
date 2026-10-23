@@ -4,6 +4,9 @@ import { useStore } from '../store';
 import type { Item, Layer, Perfume } from '../types';
 import { Stage } from './Stage';
 import { PerfumeBottle } from './PerfumeBottle';
+import { useRef } from 'react';
+import { clampScale } from '../lib/outfit';
+import { useWheel, wheelFactor } from '../lib/gestures';
 
 interface Props {
   layers: Layer[];
@@ -20,6 +23,10 @@ interface Props {
   stage?: React.ReactNode;
   /** сколько ячеек показать в компактном варианте */
   maxCells?: number;
+  /** выбор и масштаб вещей в ячейках (конструктор) */
+  selectedId?: string | null;
+  onSelect?: (itemId: string | null) => void;
+  onScale?: (itemId: string, scale: number) => void;
   className?: string;
   children?: React.ReactNode;
 }
@@ -47,7 +54,24 @@ const X = () => (
   <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" /></svg>
 );
 
-function CellView({ c, onRemove, onRemovePerfume, label = true }: { c: Cell; onRemove?: (id: string) => void; onRemovePerfume?: (id: string) => void; label?: boolean }) {
+interface CellProps {
+  c: Cell;
+  layer?: Layer;
+  onRemove?: (id: string) => void;
+  onRemovePerfume?: (id: string) => void;
+  label?: boolean;
+  selected?: boolean;
+  onSelect?: (id: string | null) => void;
+  onScale?: (id: string, scale: number) => void;
+}
+
+function CellView({ c, layer, onRemove, onRemovePerfume, label = true, selected, onSelect, onScale }: CellProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  useWheel(ref, c.kind === 'item' && layer && onScale ? (e) => {
+    onScale(c.item.id, clampScale(layer.scale * wheelFactor(e)));
+    if (!selected) onSelect?.(c.item.id);
+    return true;
+  } : null);
   if (c.kind === 'perfume') {
     const p = c.perfume;
     return (
@@ -61,18 +85,35 @@ function CellView({ c, onRemove, onRemovePerfume, label = true }: { c: Cell; onR
   const it = c.item;
   const kind = kindLabel(it, CATEGORY_BY_ID[it.category].label);
   return (
-    <div className={`look-cell ${c.outer ? 'look-cell-outer' : ''}`} data-testid={c.outer ? 'look-outer-cell' : 'look-cell'} data-item={it.id} title={it.name || kind}>
-      <div className="look-cell-img"><img src={it.imageDataUrl} alt={it.name || kind} draggable={false} /></div>
+    <div
+      ref={ref}
+      className={`look-cell ${c.outer ? 'look-cell-outer' : ''} ${selected ? 'is-selected' : ''} ${onSelect ? 'is-selectable' : ''}`}
+      data-testid={c.outer ? 'look-outer-cell' : 'look-cell'}
+      data-item={it.id}
+      title={it.name || kind}
+      onClick={onSelect ? () => onSelect(selected ? null : it.id) : undefined}
+    >
+      <div className="look-cell-img">
+        <img
+          src={it.imageDataUrl}
+          alt={it.name || kind}
+          draggable={false}
+          style={layer && (layer.scale !== 1 || layer.flip) ? { transform: `scale(${layer.scale}) scaleX(${layer.flip ? -1 : 1})` } : undefined}
+        />
+      </div>
       {label && <span className="look-cell-label">{kind}</span>}
-      {onRemove && <button className="look-cell-x" aria-label={`Снять: ${it.name || kind}`} onClick={() => onRemove(it.id)}><X /></button>}
+      {onRemove && <button className="look-cell-x" aria-label={`Снять: ${it.name || kind}`} onClick={(e) => { e.stopPropagation(); onRemove(it.id); }}><X /></button>}
     </div>
   );
 }
 
 export function Look({
   layers, itemsById, perfumeIds = [], dark, variant = 'full', showAccessories = true, showOuter = true,
-  onRemove, onRemovePerfume, stage, maxCells = 4, className, children,
+  onRemove, onRemovePerfume, stage, maxCells = 4, selectedId, onSelect, onScale, className, children,
 }: Props) {
+  const layerById = new Map(layers.map((l) => [l.itemId, l]));
+  const lay = (c: Cell) => (c.kind === 'item' ? layerById.get(c.item.id) : undefined);
+  const sel = (c: Cell) => c.kind === 'item' && !!selectedId && c.item.id === selectedId;
   const { perfumesById } = useStore();
   const { outer, cells } = splitLook(layers, itemsById);
   const perfumes = perfumeIds.map((id) => perfumesById.get(id)).filter((p): p is Perfume => !!p);
@@ -91,7 +132,7 @@ export function Look({
         <div className="look-stage">{theStage}</div>
         {strip.length > 0 && (
           <div className="look-strip">
-            {shown.map((c) => <CellView key={c.key} c={c} label={false} />)}
+            {shown.map((c) => <CellView key={c.key} c={c} layer={lay(c)} label={false} />)}
             {more > 0 && <div className="look-cell look-cell-more">+{more}</div>}
           </div>
         )}
@@ -106,14 +147,14 @@ export function Look({
     <div className="look-wrap">
     <div className={`look look-full look-cols-${cols} ${dark ? 'is-dark' : ''} ${className ?? ''}`} style={vars} data-testid="look">
       <div className="look-acc" data-testid="look-acc" hidden={!accCells.length}>
-        {accCells.map((c) => <CellView key={c.key} c={c} onRemove={onRemove} onRemovePerfume={onRemovePerfume} />)}
+        {accCells.map((c) => <CellView key={c.key} c={c} layer={lay(c)} selected={sel(c)} onSelect={onSelect} onScale={onScale} onRemove={onRemove} onRemovePerfume={onRemovePerfume} />)}
       </div>
       <div className="look-stage">
         {theStage}
         {children}
       </div>
       <div className="look-outer" data-testid="look-outer" hidden={!outerCells.length}>
-        {outerCells.map((c) => <CellView key={c.key} c={c} onRemove={onRemove} />)}
+        {outerCells.map((c) => <CellView key={c.key} c={c} layer={lay(c)} selected={sel(c)} onSelect={onSelect} onScale={onScale} onRemove={onRemove} />)}
       </div>
     </div>
     </div>

@@ -4,6 +4,7 @@ import { local, migrateFromLocalStorage } from './lib/storage';
 import { StorageFullError, blobToDataUrl, dataUrlToBlob, idb, itemsFromDataUrls, perfumesFromDataUrls, requestPersistence } from './lib/db';
 import { cleanLayers, sortLayers, wear } from './lib/outfit';
 import { nextStamp } from './lib/syncMerge';
+import { entryItemIds } from './lib/stats';
 import { uid, pluralRu } from './lib/util';
 import { useUI } from './ui';
 import type { LocalAdapter, RemoteChanges, SyncHandle, SyncRecord } from './lib/cloud';
@@ -110,17 +111,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const perfumesById = useMemo(() => new Map(perfumes.map((p) => [p.id, p])), [perfumes]);
   const wearStats = useMemo(() => {
     const m = new Map<string, WearStat>();
+    // один день = одно использование, даже если записей за день несколько
+    const seen = new Set<string>();
+    const outfitsById = new Map(outfits.map((o) => [o.id, o]));
     const bump = (id: string, date: string) => {
+      const k = `${id}|${date}`;
+      if (seen.has(k)) return;
+      seen.add(k);
       const s = m.get(id);
       if (!s) m.set(id, { count: 1, last: date });
       else { s.count++; if (date > s.last) s.last = date; }
     };
     for (const e of diary) {
-      new Set(e.layers.map((l) => l.itemId)).forEach((id) => bump(id, e.date));
-      new Set(e.perfumeIds).forEach((id) => bump(id, e.date));
+      entryItemIds(e, outfitsById).forEach((id) => bump(id, e.date));
+      (e.perfumeIds ?? []).forEach((id) => bump(id, e.date));
     }
     return m;
-  }, [diary]);
+  }, [diary, outfits]);
 
   const itemsById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
 

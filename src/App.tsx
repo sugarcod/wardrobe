@@ -14,6 +14,7 @@ import { BuilderScreen } from './screens/BuilderScreen';
 import { SuggestScreen } from './screens/SuggestScreen';
 import { OutfitsScreen } from './screens/OutfitsScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { StatsScreen } from './screens/StatsScreen';
 import type { Item } from './types';
 
 /** more — на телефоне раздел уходит в лист «Ещё» */
@@ -24,6 +25,7 @@ const NAV: { id: Route; label: string; more?: boolean; iconOnly?: boolean; icon:
   { id: 'perfumes', label: 'Парфюмы', icon: <><path d="M10 3h4v3h-4zM9.5 6h5" /><rect x="6" y="8" width="12" height="13" rx="3" /><path d="M9 14h6" /></> },
   { id: 'outfits', label: 'Образы', more: true, icon: <><rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="4" width="7" height="7" rx="1.5" /><rect x="4" y="13" width="7" height="7" rx="1.5" /><rect x="13" y="13" width="7" height="7" rx="1.5" /></> },
   { id: 'suggest', label: 'Что надеть?', more: true, icon: <path d="M12 3l1.8 4.6L18.5 9l-4.7 1.4L12 15l-1.8-4.6L5.5 9l4.7-1.4zM18 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z" /> },
+  { id: 'stats', label: 'Статистика', more: true, icon: <path d="M4 20h16M7 20v-6M12 20V6M17 20v-10" /> },
   { id: 'settings', label: 'Настройки', more: true, iconOnly: true, icon: <><circle cx="12" cy="12" r="3" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" /></> },
 ];
 
@@ -118,6 +120,7 @@ function Shell() {
           {route === 'settings' && <SettingsScreen />}
           {route === 'diary' && <DiaryScreen />}
           {route === 'perfumes' && <PerfumesScreen />}
+          {route === 'stats' && <StatsScreen />}
         </main>
 
         {moreOpen && (

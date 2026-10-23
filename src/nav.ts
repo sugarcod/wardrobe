@@ -12,8 +12,8 @@ export interface DiaryInit {
   source?: 'builder' | 'outfit' | 'calendar';
 }
 
-export type Route = 'wardrobe' | 'builder' | 'diary' | 'perfumes' | 'suggest' | 'outfits' | 'settings';
-const ROUTES: Route[] = ['wardrobe', 'builder', 'diary', 'perfumes', 'suggest', 'outfits', 'settings'];
+export type Route = 'wardrobe' | 'builder' | 'diary' | 'perfumes' | 'suggest' | 'outfits' | 'stats' | 'settings';
+const ROUTES: Route[] = ['wardrobe', 'builder', 'diary', 'perfumes', 'suggest', 'outfits', 'stats', 'settings'];
 
 function parse(): Route | null {
   const h = window.location.hash.replace(/^#\/?/, '');
