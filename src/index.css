@@ -607,3 +607,93 @@ button.swatch:hover { transform: scale(1.08); }
 .day-title::first-letter, .feed-date::first-letter { text-transform: uppercase; }
 .cal-day { aspect-ratio: 5 / 6; }
 @media (max-width: 900px) { .cal-day { aspect-ratio: 3 / 4; } }
+
+/* ---------- Образ: манекен + ячейки (раунд 5) ---------- */
+.look [hidden] { display: none !important; }
+.look-wrap { width: 100%; height: 100%; min-height: 0; container-type: size; }
+.look-full {
+  --cell: 78px; --g: clamp(12px, 2.4cqw, 30px);
+  --accw: calc(var(--acc) * (var(--cols) * var(--cell) + (var(--cols) - 1) * 10px + 12px + var(--g)));
+  /* s — половина высоты манекена: сцена 1:2 и ячейка куртки (~s по высоте) вписываются вместе */
+  --s: min(50cqh, calc((100cqw - var(--accw) - var(--out) * var(--g)) / (1 + 0.8 * var(--out))));
+  position: relative; width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center; gap: var(--g);
+}
+.look-cols-3 { --cell: 68px; }
+.look-full .look-stage { flex: none; width: var(--s); height: calc(2 * var(--s)); position: relative; display: flex; justify-content: center; }
+.look-acc {
+  flex: none; max-height: 100%; overflow-y: auto; padding: 6px;
+  display: grid; grid-template-columns: repeat(var(--cols, 1), var(--cell)); gap: 10px; align-content: center;
+  scrollbar-width: thin;
+}
+.look-outer { flex: none; width: calc(0.8 * var(--s)); height: var(--s); display: flex; flex-direction: column; gap: 10px; }
+.look-outer .look-cell { flex: 1 1 0; min-height: 0; width: 100%; aspect-ratio: auto; }
+
+.look-cell { flex: 1 1 0; min-height: 0; width: 100%; aspect-ratio: auto; }
+
+.look-cell {
+  position: relative; width: var(--cell, 84px); aspect-ratio: 1; border-radius: 16px;
+  background: linear-gradient(160deg, #fffdfa 0%, #f4eee6 100%);
+  border: 1px solid rgba(120, 100, 80, 0.12);
+  box-shadow: 0 6px 16px -10px rgba(60, 40, 20, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  display: flex; flex-direction: column; align-items: center; padding: 8px 8px 6px; gap: 4px;
+}
+.builder .look-cell { animation: cell-in 0.35s ease both; }
+@keyframes cell-in { from { opacity: 0; transform: scale(0.94); } }
+.look-cell-img { flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+.look-cell-img img { max-width: 100%; max-height: 100%; object-fit: contain; filter: drop-shadow(0 3px 4px rgba(40, 30, 20, 0.16)); }
+.look-cell-img .bottle { height: 100%; width: auto; max-width: 100%; }
+.look-cell-label { font-size: 10.5px; letter-spacing: 0.02em; color: var(--ink-2); max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
+.look-cell-perfume { background: linear-gradient(160deg, #fdfbff 0%, #f1ecf2 100%); }
+.look-cell-x {
+  position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center; border: 1px solid var(--line); background: #fff; color: var(--ink-2);
+  box-shadow: 0 2px 6px rgba(40, 30, 20, 0.14); cursor: pointer; opacity: 0.85; transition: opacity 0.2s, transform 0.2s, color 0.2s;
+}
+.look-cell-x:hover { opacity: 1; color: var(--ink); transform: scale(1.08); }
+.look-cell-outer { width: auto; padding: 12px 12px 8px; border-radius: 20px; }
+.look-cell-outer .look-cell-label { font-size: 11.5px; }
+.look.is-dark .look-cell { background: linear-gradient(160deg, #46413c 0%, #37332f 100%); border-color: rgba(255, 255, 255, 0.07); box-shadow: 0 6px 16px -10px rgba(0, 0, 0, 0.6); }
+.look.is-dark .look-cell-label { color: #cfc6bb; }
+.look.is-dark .look-cell-x { background: #2e2b28; color: #e8e0d6; border-color: #4a4540; }
+
+.look-toggles { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+.chip-sm { padding: 5px 11px; font-size: 12.5px; }
+.layer-row.is-static { cursor: default; }
+
+/* компактная миниатюра */
+.look-compact { position: relative; width: 100%; height: 100%; container-type: size; display: flex; justify-content: center; align-items: center; gap: 4%; }
+.look-compact .look-stage { height: 100%; display: flex; justify-content: center; min-width: 0; }
+.look-strip { display: flex; flex-direction: column; gap: min(2.4cqh, 6px); justify-content: center; flex: none; }
+.look-compact .look-cell { --cell: min(19cqw, 15cqh); height: var(--cell); flex: none; padding: 8%; border-radius: 22%; animation: none; box-shadow: 0 3px 8px -6px rgba(60, 40, 20, 0.3); }
+.look-compact .look-cell-outer { --cell: min(24cqw, 20cqh); }
+.look-cell-more { justify-content: center; font-size: min(5cqw, 12px); color: var(--ink-2); }
+.look-compact.has-strip .look-stage { flex: 0 1 auto; }
+.cal-thumb .look-compact { gap: 1px; }
+.cal-thumb .look-compact .look-cell { border-radius: 3px; padding: 1px; border-width: 0; box-shadow: none; }
+.diary-thumb { width: 124px; }
+.suggest-result { grid-template-columns: minmax(420px, 600px) 1fr; }
+.suggest-result .stage-frame-sm { height: 600px; }
+
+@media (max-width: 1180px) {
+  .look-full { --cell: 72px; }
+  .look-cols-3 { --cell: 62px; }
+}
+@media (max-width: 900px) {
+  .look-full { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; row-gap: 10px; column-gap: 8px; }
+  .look-full .look-stage { grid-row: 1; grid-column: 2; width: auto; height: 100%; min-height: 0; }
+  .look-outer { grid-row: 1; grid-column: 3; justify-self: start; height: auto; width: 100%; max-width: 116px; aspect-ratio: 4 / 5; }
+  .look-outer .look-cell-outer { padding: 8px 8px 6px; }
+  .look-acc {
+    grid-row: 2; grid-column: 1 / -1; justify-self: stretch; min-width: 0; max-height: none; overflow-x: auto; overflow-y: visible;
+    display: flex; gap: 8px; justify-content: safe center; padding: 8px 6px 4px;
+  }
+  .look-full { --cell: 64px; }
+  .look-acc .look-cell { flex: none; }
+  .look-cell-label { font-size: 9.5px; }
+  .look-toggles { justify-content: flex-start; margin-left: 0; }
+  .stage-toolbar { flex-wrap: wrap; }
+  .suggest-result { grid-template-columns: 1fr; }
+  .suggest-result .stage-frame-sm { height: 66vh; }
+  .diary-thumb { width: 104px; }
+}

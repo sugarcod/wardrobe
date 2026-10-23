@@ -121,3 +121,21 @@ export function levelOf(item: Pick<Item, 'category' | 'subtype'>): Level | undef
 export function kindLabel(item: Pick<Item, 'category' | 'subtype'>, categoryLabel: string): string {
   return validSubtype(item)?.label ?? categoryLabel;
 }
+
+// ---------- композиция образа: манекен + ячейки ----------
+
+/** body — рисуется на манекене; outer — своя ячейка справа; cell — ячейки аксессуаров */
+export type Placement = 'body' | 'outer' | 'cell';
+const BODY_SLOTS = new Set(['torso-base', 'torso-mid', 'bottom', 'dress', 'feet']);
+const CELL_ORDER = ['head', 'face', 'ears', 'neck', 'scarf', 'watch', 'bracelet', 'ring', 'jewel', 'waist', 'bag', 'other'];
+
+export function placementOf(item: Pick<Item, 'category' | 'subtype'>): Placement {
+  const s = slotOf(item).slot;
+  return BODY_SLOTS.has(s) ? 'body' : s === 'torso-outer' ? 'outer' : 'cell';
+}
+
+/** Порядок ячеек аксессуаров: сверху вниз по телу */
+export function cellRank(item: Pick<Item, 'category' | 'subtype'>): number {
+  const i = CELL_ORDER.indexOf(slotOf(item).slot);
+  return i < 0 ? CELL_ORDER.length : i;
+}

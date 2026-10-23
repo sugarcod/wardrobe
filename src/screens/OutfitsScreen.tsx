@@ -1,4 +1,4 @@
-import { Stage } from '../components/Stage';
+import { Look } from '../components/Look';
 import { Empty } from '../components/Empty';
 import { useStore } from '../store';
 import { useApp } from '../nav';
@@ -46,7 +46,7 @@ export function OutfitsScreen() {
             return (
               <article key={o.id} className="outfit-card">
                 <button className={`outfit-thumb ${prefs.sceneDark ? 'is-dark' : ''}`} onClick={() => open(o)} aria-label={`Открыть ${o.name}`}>
-                  <Stage layers={o.layers} itemsById={itemsById} dark={prefs.sceneDark} />
+                  <Look variant="compact" layers={o.layers} itemsById={itemsById} dark={prefs.sceneDark} maxCells={5} />
                 </button>
                 <div className="outfit-meta">
                   <div>

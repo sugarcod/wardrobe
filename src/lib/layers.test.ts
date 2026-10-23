@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { recencyWeight, wear } from './outfit';
 import { kindFromName, hintsFromFilename } from './suggest';
-import { slotOf } from '../catalog';
+import { cellRank, placementOf, slotOf } from '../catalog';
+import { splitLook } from '../components/Look';
 import { monthGrid } from './util';
 import type { Category, Item, Layer } from '../types';
 
@@ -93,5 +94,30 @@ describe('diary helpers', () => {
     expect(g.length % 7).toBe(0);
     expect(g[0].iso).toBe('2026-09-28');
     expect(g.find((c) => c.inMonth)!.iso).toBe('2026-10-01');
+  });
+});
+
+describe('look composition', () => {
+  it('only clothing goes on the mannequin; outerwear and accessories go to cells', () => {
+    expect(placementOf(mk('a', 'top', 'tshirt'))).toBe('body');
+    expect(placementOf(mk('b', 'top', 'sweater'))).toBe('body');
+    expect(placementOf(mk('c', 'bottom'))).toBe('body');
+    expect(placementOf(mk('d', 'dress'))).toBe('body');
+    expect(placementOf(mk('e', 'shoes'))).toBe('body');
+    for (const s of ['jacket', 'coat', 'puffer', 'trench']) expect(placementOf(mk(s, 'outerwear', s))).toBe('outer');
+    for (const [c, s] of [['hat', 'beanie'], ['bag', 'briefcase'], ['bag', 'backpack'], ['jewelry', 'watch'], ['jewelry', 'ring'], ['other', 'glasses'], ['other', 'belt'], ['other', 'scarf']] as const)
+      expect(placementOf(mk(s, c, s))).toBe('cell');
+  });
+  it('cells are ordered head to toe', () => {
+    const list = [mk('bag', 'bag', 'handbag'), mk('ring', 'jewelry', 'ring'), mk('hat', 'hat', 'beanie'), mk('neck', 'jewelry', 'necklace')];
+    expect([...list].sort((a, b) => cellRank(a) - cellRank(b)).map((i) => i.id)).toEqual(['hat', 'neck', 'ring', 'bag']);
+  });
+  it('splitLook keeps stored layers but separates outer and cells', () => {
+    const items = [mk('t', 'top', 'tshirt'), mk('j', 'outerwear', 'jacket'), mk('w', 'jewelry', 'watch')];
+    const byId = new Map(items.map((i) => [i.id, i]));
+    const layers = items.map((i) => ({ itemId: i.id, x: 0.1, y: 0, scale: 0.5, flip: false }));
+    const { outer, cells } = splitLook([...layers, { itemId: 'gone', x: 0, y: 0, scale: 1, flip: false }], byId);
+    expect(outer.map((i) => i.id)).toEqual(['j']);
+    expect(cells.map((i) => i.id)).toEqual(['w']);
   });
 });

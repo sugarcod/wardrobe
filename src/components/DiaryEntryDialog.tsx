@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Modal } from './Modal';
-import { Stage } from './Stage';
+import { Look } from './Look';
 import { PerfumePicker } from './PerfumePicker';
 import { itemTitle } from './OutfitTags';
 import { MOODS, WEATHERS } from '../perfume';
@@ -68,7 +68,7 @@ export function DiaryEntryDialog({ init, onClose, onOpenPerfumes }: { init: Diar
     <Modal title={e ? 'Запись в дневнике' : 'Записать в дневник'} size="lg" onClose={onClose}>
       <div className="diary-form">
         <div className={`diary-form-stage ${prefs.sceneDark ? 'is-dark' : ''}`}>
-          <Stage layers={layers} itemsById={itemsById} dark={prefs.sceneDark} />
+          <Look variant="compact" layers={layers} itemsById={itemsById} dark={prefs.sceneDark} maxCells={5} />
           {!present.length && <div className="stage-hint">Без образа</div>}
         </div>
         <div className="form">

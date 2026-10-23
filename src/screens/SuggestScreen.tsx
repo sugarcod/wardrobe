@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { kindLabel } from '../catalog';
 import { todayISO } from '../lib/util';
-import { Stage } from '../components/Stage';
+import { Look } from '../components/Look';
 import { Empty } from '../components/Empty';
 import { itemTitle } from '../components/OutfitTags';
 import { CATEGORY_BY_ID, OCCASIONS, SEASONS, currentSeason } from '../constants';
@@ -85,7 +85,7 @@ export function SuggestScreen() {
           {sug ? (
             <div className="suggest-result">
               <div className={`stage-frame stage-frame-sm ${prefs.sceneDark ? 'is-dark' : ''}`}>
-                <Stage layers={sug.layers} itemsById={itemsById} dark={prefs.sceneDark} />
+                <Look layers={sug.layers} itemsById={itemsById} dark={prefs.sceneDark} />
               </div>
               <div className="suggest-info panel">
                 <h2 className="panel-title serif">{suggestionTitle(opt)}</h2>

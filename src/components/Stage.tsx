@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { CATEGORY_BY_ID } from '../constants';
-import { slotOf } from '../catalog';
+import { placementOf, slotOf } from '../catalog';
 import type { Item, Layer } from '../types';
 import { Mannequin } from './Mannequin';
 import { ensureAlpha, getAlpha } from '../lib/hit';
@@ -33,7 +33,11 @@ export function Stage({ layers, itemsById, dark, interactive, selectedId, onSele
     });
   }, [layers, itemsById, interactive]);
 
-  const visible = layers.filter((l) => itemsById.has(l.itemId) && !l.hidden);
+  // на манекене только одежда; верхняя одежда и аксессуары — в ячейках (см. Look)
+  const visible = layers.filter((l) => {
+    const it = itemsById.get(l.itemId);
+    return it && !l.hidden && placementOf(it) === 'body';
+  });
 
   const hitTest = (clientX: number, clientY: number): Layer | null => {
     const el = ref.current;

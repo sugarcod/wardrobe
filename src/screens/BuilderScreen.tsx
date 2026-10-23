@@ -6,7 +6,8 @@ import { Empty } from '../components/Empty';
 import { Modal } from '../components/Modal';
 import { OutfitTags, itemTitle } from '../components/OutfitTags';
 import { CATEGORY_BY_ID } from '../constants';
-import { LEVEL_LABEL, kindLabel, slotOf } from '../catalog';
+import { LEVEL_LABEL, kindLabel, placementOf, slotOf } from '../catalog';
+import { Look } from '../components/Look';
 import { PerfumeChips, PerfumePicker } from '../components/PerfumePicker';
 import { useStore } from '../store';
 import { useApp } from '../nav';
@@ -31,6 +32,8 @@ export function BuilderScreen() {
   const layers = draft.layers;
   const wornItems = layers.map((l) => itemsById.get(l.itemId)!).filter(Boolean);
   const sel = layers.find((l) => l.itemId === selected);
+  const hideAcc = !!prefs.hideAccessories;
+  const hideOuter = !!prefs.hideOuter;
 
   const list = useMemo(() => {
     const nq = normalizeText(q.trim());
@@ -89,7 +92,7 @@ export function BuilderScreen() {
             <input className="input input-sm builder-search" placeholder="Поиск" value={q} onChange={(e) => setQ(e.target.value)} />
             <div className="builder-items">
               {list.map((it) => (
-                <ItemCard key={it.id} item={it} compact active={worn.has(it.id)} onClick={() => { wearItem(it); setSelected(worn.has(it.id) ? null : it.id); }} />
+                <ItemCard key={it.id} item={it} compact active={worn.has(it.id)} onClick={() => { wearItem(it); setSelected(worn.has(it.id) || placementOf(it) !== 'body' ? null : it.id); }} />
               ))}
               {!list.length && <p className="muted small pad">Ничего не нашлось</p>}
             </div>
@@ -112,34 +115,56 @@ export function BuilderScreen() {
               <span className="muted small">Новый образ</span>
             )}
           </div>
+          <div className="look-toggles" role="group" aria-label="Что показывать">
+            <button
+              className={`chip chip-sm ${hideAcc && hideOuter ? 'is-on' : ''}`}
+              data-testid="toggle-look-only"
+              aria-pressed={hideAcc && hideOuter}
+              onClick={() => (hideAcc && hideOuter ? setPrefs({ hideAccessories: false, hideOuter: false }) : setPrefs({ hideAccessories: true, hideOuter: true }))}
+            >
+              Только лук
+            </button>
+            <button className={`chip chip-sm ${hideAcc ? 'is-on' : ''}`} data-testid="toggle-accessories" aria-pressed={hideAcc} onClick={() => setPrefs({ hideAccessories: !hideAcc })}>
+              Скрыть аксессуары
+            </button>
+            <button className={`chip chip-sm ${hideOuter ? 'is-on' : ''}`} data-testid="toggle-outer" aria-pressed={hideOuter} onClick={() => setPrefs({ hideOuter: !hideOuter })}>
+              Скрыть верхнюю одежду
+            </button>
+          </div>
           <div className="seg" role="group" aria-label="Фон сцены">
             <button className={!prefs.sceneDark ? 'is-on' : ''} onClick={() => setPrefs({ sceneDark: false })}>Светлый</button>
             <button className={prefs.sceneDark ? 'is-on' : ''} onClick={() => setPrefs({ sceneDark: true })}>Тёмный</button>
           </div>
         </div>
         <div className={`stage-frame ${prefs.sceneDark ? 'is-dark' : ''}`}>
-          <Stage
+          <Look
             layers={layers}
             itemsById={itemsById}
+            perfumeIds={draft.perfumeIds}
             dark={prefs.sceneDark}
-            interactive
-            selectedId={selected}
-            onSelect={setSelected}
-            onMove={(id, x, y) => updateLayer(id, { x, y })}
+            showAccessories={!hideAcc}
+            showOuter={!hideOuter}
+            onRemove={removeLayer}
+            onRemovePerfume={(id) => setDraftPerfumes((draft.perfumeIds ?? []).filter((x) => x !== id))}
+            stage={
+              <Stage
+                layers={layers}
+                itemsById={itemsById}
+                dark={prefs.sceneDark}
+                interactive
+                selectedId={selected}
+                onSelect={setSelected}
+                onMove={(id, x, y) => updateLayer(id, { x, y })}
+              />
+            }
           />
-          {(draft.perfumeIds?.length ?? 0) > 0 && (
-            <div className="stage-aroma" data-testid="stage-aroma">
-              <span className="muted small">аромат дня</span>
-              <PerfumeChips ids={draft.perfumeIds ?? []} />
-            </div>
-          )}
           {!layers.length && (
             <div className="stage-hint">
               {items.length ? 'Нажмите на вещь в гардеробе, чтобы надеть её' : 'Сначала добавьте вещи в гардероб'}
             </div>
           )}
         </div>
-        <p className="muted small stage-help">Перетаскивайте вещь на манекене, чтобы подвинуть. Стрелки — точная подстройка.</p>
+        <p className="muted small stage-help">Перетаскивайте одежду на манекене, чтобы подвинуть; стрелки — точная подстройка. Верхняя одежда и аксессуары — в ячейках рядом.</p>
       </section>
 
       <aside className="panel builder-side">
@@ -152,16 +177,17 @@ export function BuilderScreen() {
             {[...layers].reverse().map((l) => {
               const it = itemsById.get(l.itemId)!;
               const slot = slotOf(it);
-              const isSel = selected === l.itemId;
+              const onBody = placementOf(it) === 'body';
+              const isSel = onBody && selected === l.itemId;
               return (
                 <li key={l.itemId} className={`layer ${isSel ? 'is-selected' : ''} ${l.hidden ? 'is-hidden' : ''}`} data-slot={slot.slot}>
-                  <div className="layer-row" onClick={() => setSelected(isSel ? null : l.itemId)}>
+                  <div className={`layer-row ${onBody ? '' : 'is-static'}`} onClick={() => setSelected(onBody && !isSel ? l.itemId : null)}>
                     <div className="checker layer-thumb"><img src={it.imageDataUrl} alt="" /></div>
                     <div className="layer-info">
                       <div className="layer-name">{itemTitle(it)}</div>
-                      <div className="muted small">{kindLabel(it, CATEGORY_BY_ID[it.category].label)} · {slot.level ? LEVEL_LABEL[slot.level] : slot.zone}</div>
+                      <div className="muted small">{kindLabel(it, CATEGORY_BY_ID[it.category].label)} · {slot.level === 'outer' ? 'отдельная ячейка' : slot.level ? LEVEL_LABEL[slot.level] : onBody ? slot.zone : 'ячейка рядом'}</div>
                     </div>
-                    <button
+                    {onBody && <button
                       className={`icon-btn icon-btn-sm ${l.hidden ? 'is-off' : ''}`}
                       data-testid="layer-eye"
                       aria-label={l.hidden ? 'Показать' : 'Скрыть'}
@@ -174,7 +200,7 @@ export function BuilderScreen() {
                         <circle cx="12" cy="12" r="2.8" />
                         {l.hidden && <path d="M4 20L20 4" />}
                       </svg>
-                    </button>
+                    </button>}
                     <button className="icon-btn icon-btn-sm" aria-label="Снять" title="Снять" onClick={(e) => { e.stopPropagation(); removeLayer(l.itemId); }}>
                       <svg width="14" height="14" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
                     </button>
@@ -221,7 +247,7 @@ export function BuilderScreen() {
           {pickPerfume ? (
             <PerfumePicker value={draft.perfumeIds ?? []} onChange={setDraftPerfumes} onEmpty={() => navigate('perfumes')} />
           ) : (
-            <PerfumeChips ids={draft.perfumeIds ?? []} empty="Не выбран — аромат не надевается на манекен, но попадёт в дневник." />
+            <PerfumeChips ids={draft.perfumeIds ?? []} empty="Не выбран — аромат появится в ячейке рядом с манекеном и попадёт в дневник." />
           )}
         </div>
 

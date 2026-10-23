@@ -107,6 +107,10 @@ export interface Draft {
 
 export interface Prefs {
   sceneDark: boolean;
+  /** скрыть ячейки аксессуаров и ароматов на сцене */
+  hideAccessories?: boolean;
+  /** скрыть ячейку верхней одежды на сцене */
+  hideOuter?: boolean;
 }
 
 export interface BackupFile {

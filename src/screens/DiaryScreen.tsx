@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Stage } from '../components/Stage';
+import { Look } from '../components/Look';
 import { PerfumeChips } from '../components/PerfumePicker';
 import { PerfumeBottle } from '../components/PerfumeBottle';
 import { itemTitle } from '../components/OutfitTags';
@@ -99,7 +99,7 @@ export function DiaryScreen() {
                   >
                     <span className="cal-num">{parseISODate(c.iso).getDate()}</span>
                     {first && (first.layers.some((l) => itemsById.has(l.itemId)) ? (
-                      <span className="cal-thumb"><Stage layers={first.layers} itemsById={itemsById} className="stage-mini" /></span>
+                      <span className="cal-thumb"><Look variant="compact" layers={first.layers} itemsById={itemsById} maxCells={2} /></span>
                     ) : pf ? (
                       <span className="cal-thumb cal-thumb-perfume"><PerfumeBottle perfume={pf} className="bottle-xs" /></span>
                     ) : (
@@ -173,7 +173,7 @@ function DiaryCard({ entry, dark }: { entry: DiaryEntry; dark: boolean }) {
     <article className="diary-card" data-testid="diary-entry">
       {present.length > 0 && (
         <button className={`diary-thumb ${dark ? 'is-dark' : ''}`} onClick={wearAgain} title="Надеть снова">
-          <Stage layers={present} itemsById={itemsById} dark={dark} />
+          <Look variant="compact" layers={present} itemsById={itemsById} dark={dark} maxCells={4} />
         </button>
       )}
       <div className="diary-body">
