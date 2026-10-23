@@ -9,7 +9,8 @@ import { formatBytes, pluralRu } from '../lib/util';
 import type { BackupFile } from '../types';
 
 export function SettingsScreen() {
-  const { items, outfits, importData, wipeAll, persisted } = useStore();
+  const { items, outfits, perfumes, diary, importData, wipeAll, persisted } = useStore();
+  const empty = !items.length && !outfits.length && !perfumes.length && !diary.length;
   const { toast, confirm } = useUI();
   const { user } = useCloud();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -25,7 +26,7 @@ export function SettingsScreen() {
     setExporting(true);
     let backup;
     try {
-      backup = await makeBackup(items, outfits);
+      backup = await makeBackup(items, outfits, perfumes, diary);
     } catch {
       setExporting(false);
       return toast('Не удалось подготовить копию.', 'error');
@@ -47,17 +48,23 @@ export function SettingsScreen() {
     } catch (e) {
       return toast((e as Error).message, 'error');
     }
-    const summary = `${data.items.length} ${pluralRu(data.items.length, 'вещь', 'вещи', 'вещей')} и ${data.outfits.length} ${pluralRu(data.outfits.length, 'образ', 'образа', 'образов')}`;
+    const np = data.perfumes?.length ?? 0, nd = data.diary?.length ?? 0;
+    const summary = [
+      `${data.items.length} ${pluralRu(data.items.length, 'вещь', 'вещи', 'вещей')}`,
+      `${data.outfits.length} ${pluralRu(data.outfits.length, 'образ', 'образа', 'образов')}`,
+      np ? `${np} ${pluralRu(np, 'аромат', 'аромата', 'ароматов')}` : '',
+      nd ? `${nd} ${pluralRu(nd, 'запись', 'записи', 'записей')} дневника` : '',
+    ].filter(Boolean).join(', ');
     if (mode === 'replace') {
       if (!(await confirm({ title: 'Заменить все данные?', text: `Текущий гардероб будет заменён: ${summary}.`, confirmText: 'Заменить', danger: true }))) return;
-      if (await importData(data.items, data.outfits, true)) toast(`Импортировано: ${summary}`, 'success');
+      if (await importData(data.items, data.outfits, true, data.perfumes, data.diary)) toast(`Импортировано: ${summary}`, 'success');
     } else {
-      if (await importData(data.items, data.outfits, false)) toast(`Добавлено из копии: ${summary}`, 'success');
+      if (await importData(data.items, data.outfits, false, data.perfumes, data.diary)) toast(`Добавлено из копии: ${summary}`, 'success');
     }
   };
 
   const wipe = async () => {
-    if (!(await confirm({ title: 'Удалить все данные?', text: user ? 'Все вещи и образы будут удалены на этом устройстве и в облаке (на всех ваших устройствах). Сначала сделайте резервную копию.' : 'Все вещи и образы будут удалены из этого браузера. Сначала сделайте резервную копию.', confirmText: 'Удалить всё', danger: true }))) return;
+    if (!(await confirm({ title: 'Удалить все данные?', text: user ? 'Все вещи, образы, парфюмы и дневник будут удалены на этом устройстве и в облаке (на всех ваших устройствах). Сначала сделайте резервную копию.' : 'Все вещи, образы, парфюмы и дневник будут удалены из этого браузера. Сначала сделайте резервную копию.', confirmText: 'Удалить всё', danger: true }))) return;
     if (await wipeAll()) toast('Данные удалены');
   };
 
@@ -75,7 +82,7 @@ export function SettingsScreen() {
       <section className="panel settings-block">
         <h2 className="panel-title">Хранилище</h2>
         <p className="muted">
-          {items.length} {pluralRu(items.length, 'вещь', 'вещи', 'вещей')}, {outfits.length} {pluralRu(outfits.length, 'образ', 'образа', 'образов')}
+          {items.length} {pluralRu(items.length, 'вещь', 'вещи', 'вещей')}, {outfits.length} {pluralRu(outfits.length, 'образ', 'образа', 'образов')}, {perfumes.length} {pluralRu(perfumes.length, 'аромат', 'аромата', 'ароматов')}, {diary.length} {pluralRu(diary.length, 'запись', 'записи', 'записей')} в дневнике
           {est ? <> · занято {formatBytes(est.usage)} из доступных {formatBytes(est.quota)}</> : est === null ? ' · браузер не сообщает объём' : ''}
         </p>
         {est && <div className="meter" data-testid="storage-meter"><div style={{ width: `${pct}%` }} /></div>}
@@ -88,9 +95,9 @@ export function SettingsScreen() {
 
       <section className="panel settings-block">
         <h2 className="panel-title">Резервная копия</h2>
-        <p className="muted">Сохраните все вещи и образы в файл JSON, чтобы перенести на другое устройство или не потерять при очистке браузера.</p>
+        <p className="muted">Сохраните вещи, образы, парфюмы и дневник в файл JSON, чтобы перенести на другое устройство или не потерять при очистке браузера.</p>
         <div className="row-gap">
-          <button className="btn btn-primary" onClick={exportJson} disabled={exporting || (!items.length && !outfits.length)}>{exporting ? 'Готовим файл…' : 'Скачать копию (JSON)'}</button>
+          <button className="btn btn-primary" onClick={exportJson} disabled={exporting || empty}>{exporting ? 'Готовим файл…' : 'Скачать копию (JSON)'}</button>
         </div>
         <div className="row-gap">
           <div className="seg">
@@ -104,8 +111,8 @@ export function SettingsScreen() {
 
       <section className="panel settings-block">
         <h2 className="panel-title">Очистка</h2>
-        <p className="muted">{user ? 'Удалить все вещи и образы — здесь и в облаке.' : 'Удалить все вещи и образы из этого браузера.'}</p>
-        <button className="btn btn-danger-ghost" onClick={wipe} disabled={!items.length && !outfits.length}>Удалить все данные</button>
+        <p className="muted">{user ? 'Удалить все данные — здесь и в облаке.' : 'Удалить все данные из этого браузера.'}</p>
+        <button className="btn btn-danger-ghost" onClick={wipe} disabled={empty}>Удалить все данные</button>
       </section>
 
       <section className="settings-about muted small">

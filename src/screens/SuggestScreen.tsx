@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { kindLabel } from '../catalog';
+import { todayISO } from '../lib/util';
 import { Stage } from '../components/Stage';
 import { Empty } from '../components/Empty';
 import { itemTitle } from '../components/OutfitTags';
@@ -11,7 +13,8 @@ import { useUI } from '../ui';
 import type { Occasion } from '../types';
 
 export function SuggestScreen() {
-  const { items, itemsById, setLayers, clearDraft, prefs } = useStore();
+  const { items, itemsById, setLayers, clearDraft, prefs, wearStats } = useStore();
+  const recent = useMemo(() => new Map([...wearStats].map(([id, st]) => [id, st.last])), [wearStats]);
   const { navigate, pickFiles } = useApp();
   const { toast } = useUI();
   const autoSeason = currentSeason();
@@ -19,8 +22,8 @@ export function SuggestScreen() {
   const [sug, setSug] = useState<Suggestion | null>(null);
 
   const generate = useCallback(
-    (o: SuggestOptions, avoid?: string) => setSug(suggestOutfit(items, o, avoid)),
-    [items],
+    (o: SuggestOptions, avoid?: string) => setSug(suggestOutfit(items, { ...o, recent, today: todayISO() }, avoid)),
+    [items, recent],
   );
 
   useEffect(() => {
@@ -43,7 +46,7 @@ export function SuggestScreen() {
       <header className="page-head">
         <div>
           <h1 className="page-title">Что надеть?</h1>
-          <p className="page-sub">Подберём образ из ваших вещей с учётом сезона, повода и сочетания цветов.</p>
+          <p className="page-sub">Подберём образ из ваших вещей с учётом сезона, повода и сочетания цветов — и реже предложим то, что вы надевали на днях.</p>
         </div>
       </header>
 
@@ -94,7 +97,7 @@ export function SuggestScreen() {
                       <div>
                         <div className="layer-name">{itemTitle(it)}</div>
                         <div className="muted small">
-                          {CATEGORY_BY_ID[it.category].label}
+                          {kindLabel(it, CATEGORY_BY_ID[it.category].label)}
                           {it.color && <> · <span className="swatch swatch-xs" style={swatchStyle(it.color)} /> {colorLabel(it.color)}</>}
                         </div>
                       </div>

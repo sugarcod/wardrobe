@@ -1,8 +1,19 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import type { Item } from './types';
+import type { DiaryEntry, Item, Layer } from './types';
 
-export type Route = 'wardrobe' | 'builder' | 'suggest' | 'outfits' | 'settings';
-const ROUTES: Route[] = ['wardrobe', 'builder', 'suggest', 'outfits', 'settings'];
+/** С чего начать запись в дневник */
+export interface DiaryInit {
+  entry?: DiaryEntry;
+  date?: string;
+  layers?: Layer[];
+  outfitId?: string;
+  perfumeIds?: string[];
+  /** откуда пришли — для подписи в окне */
+  source?: 'builder' | 'outfit' | 'calendar';
+}
+
+export type Route = 'wardrobe' | 'builder' | 'diary' | 'perfumes' | 'suggest' | 'outfits' | 'settings';
+const ROUTES: Route[] = ['wardrobe', 'builder', 'diary', 'perfumes', 'suggest', 'outfits', 'settings'];
 
 function parse(): Route | null {
   const h = window.location.hash.replace(/^#\/?/, '');
@@ -29,6 +40,7 @@ export interface AppActions {
   startUpload: (files: File[]) => void;
   pickFiles: () => void;
   openItem: (item: Item) => void;
+  recordDiary: (init: DiaryInit) => void;
 }
 
 export const AppCtx = createContext<AppActions | null>(null);

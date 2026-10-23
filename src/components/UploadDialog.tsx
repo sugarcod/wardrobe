@@ -21,7 +21,7 @@ interface Draft {
   hints: Hints;
 }
 
-const emptyFields = (): ItemFields => ({ name: '', category: '', color: '', season: 'all', occasion: '', tags: [] });
+const emptyFields = (): ItemFields => ({ name: '', category: '', subtype: '', color: '', season: 'all', occasion: '', tags: [] });
 
 export function UploadDialog({ files, onClose }: { files: File[]; onClose: () => void }) {
   const { addItems } = useStore();
@@ -44,10 +44,11 @@ export function UploadDialog({ files, onClose }: { files: File[]; onClose: () =>
         try {
           const p = await processFile(files[i]);
           const h = hintsFromFilename(files[i].name);
-          const hints: Hints = { category: h.category, season: h.season, occasion: h.occasion, color: h.color ?? (p.color || undefined) };
+          const hints: Hints = { category: h.category, subtype: h.subtype, season: h.season, occasion: h.occasion, color: h.color ?? (p.color || undefined) };
           const fields: ItemFields = {
             name: h.name,
             category: h.category ?? '',
+            subtype: h.subtype ?? '',
             color: hints.color ?? '',
             season: h.season ?? 'all',
             occasion: h.occasion ?? '',
@@ -79,6 +80,7 @@ export function UploadDialog({ files, onClose }: { files: File[]; onClose: () =>
       id: uid(),
       name: d.fields.name.trim(),
       category: d.fields.category as Item['category'],
+      ...(d.fields.subtype ? { subtype: d.fields.subtype } : {}),
       tags: d.fields.tags,
       color: d.fields.color,
       season: d.fields.season,

@@ -1,4 +1,4 @@
-import type { BackupFile, Draft, Item, Outfit, Prefs } from '../types';
+import type { BackupFile, DiaryEntry, Draft, Item, Outfit, Perfume, Prefs } from '../types';
 import { blobToDataUrl, dataUrlToBlob, idb, itemsFromDataUrls } from './db';
 
 /** Ключи старой версии (localStorage) — переносятся в IndexedDB при первом запуске */
@@ -55,13 +55,14 @@ export async function migrateFromLocalStorage(): Promise<number> {
   return records.length;
 }
 
-export async function makeBackup(items: Item[], outfits: Outfit[]): Promise<BackupFile> {
+const toDataUrl = async (url: string) => (url.startsWith('data:') ? url : blobToDataUrl(await dataUrlToBlob(url)));
+
+export async function makeBackup(items: Item[], outfits: Outfit[], perfumes: Perfume[] = [], diary: DiaryEntry[] = []): Promise<BackupFile> {
   const withData: Item[] = [];
-  for (const it of items) {
-    const url = it.imageDataUrl.startsWith('data:') ? it.imageDataUrl : await blobToDataUrl(await dataUrlToBlob(it.imageDataUrl));
-    withData.push({ ...it, imageDataUrl: url });
-  }
-  return { app: 'wardrobe', version: 1, exportedAt: new Date().toISOString(), items: withData, outfits };
+  for (const it of items) withData.push({ ...it, imageDataUrl: await toDataUrl(it.imageDataUrl) });
+  const pf: Perfume[] = [];
+  for (const p of perfumes) pf.push(p.imageDataUrl ? { ...p, imageDataUrl: await toDataUrl(p.imageDataUrl) } : p);
+  return { app: 'wardrobe', version: 2, exportedAt: new Date().toISOString(), items: withData, outfits, perfumes: pf, diary };
 }
 
 export function parseBackup(text: string): BackupFile {
@@ -79,5 +80,19 @@ export function parseBackup(text: string): BackupFile {
     .filter((i): i is Item => !!i && typeof i.id === 'string' && typeof i.imageDataUrl === 'string' && i.imageDataUrl.startsWith('data:image/') && typeof i.category === 'string')
     .map((i) => ({ ...i, tags: Array.isArray(i.tags) ? i.tags : [], season: i.season ?? 'all', color: i.color ?? '', name: i.name ?? '' }));
   const outfits = d.outfits.filter((o): o is Outfit => !!o && typeof o.id === 'string' && Array.isArray(o.layers));
-  return { app: 'wardrobe', version: 1, exportedAt: d.exportedAt ?? '', items, outfits };
+  const perfumes = (Array.isArray(d.perfumes) ? d.perfumes : [])
+    .filter((p): p is Perfume => !!p && typeof p.id === 'string' && typeof p.name === 'string')
+    .map((p) => ({
+      ...p,
+      brand: p.brand ?? '',
+      family: p.family ?? 'other',
+      season: p.season ?? 'all',
+      tags: Array.isArray(p.tags) ? p.tags : [],
+      createdAt: p.createdAt ?? new Date().toISOString(),
+      imageDataUrl: typeof p.imageDataUrl === 'string' && p.imageDataUrl.startsWith('data:image/') ? p.imageDataUrl : undefined,
+    }));
+  const diary = (Array.isArray(d.diary) ? d.diary : [])
+    .filter((e): e is DiaryEntry => !!e && typeof e.id === 'string' && typeof e.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(e.date))
+    .map((e) => ({ ...e, layers: Array.isArray(e.layers) ? e.layers : [], perfumeIds: Array.isArray(e.perfumeIds) ? e.perfumeIds : [], createdAt: e.createdAt ?? new Date().toISOString() }));
+  return { app: 'wardrobe', version: 2, exportedAt: d.exportedAt ?? '', items, outfits, perfumes, diary };
 }

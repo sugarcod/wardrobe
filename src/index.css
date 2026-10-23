@@ -435,3 +435,175 @@ button.swatch:hover { transform: scale(1.08); }
   .account-signin { padding: 0 10px; }
   .account-badge { padding: 3px; }
 }
+
+/* ---------- small shared bits ---------- */
+.chip-sm { padding: 4px 11px; font-size: 12.5px; }
+.textarea { height: auto; min-height: 76px; padding-top: 10px; padding-bottom: 10px; resize: vertical; line-height: 1.45; font-family: inherit; }
+.wear-stat { display: block; color: var(--accent); margin-top: 2px; }
+.item-card .wear-stat { font-size: 11.5px; margin-top: 3px; }
+.subtype-group { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.subtype-group + .subtype-group { margin-top: 10px; }
+.family-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08); }
+.chip .family-dot { margin-right: 6px; }
+.layer.is-hidden .layer-thumb, .layer.is-hidden .layer-info { opacity: 0.45; }
+.icon-btn.is-off { color: var(--accent); }
+
+/* ---------- perfume bottles ---------- */
+.bottle { width: 100%; height: 100%; display: flex; align-items: flex-end; justify-content: center; }
+.bottle svg { height: 100%; width: auto; max-width: 100%; filter: drop-shadow(0 4px 5px rgba(60, 40, 20, 0.16)); }
+.bottle-photo img { max-width: 100%; max-height: 100%; object-fit: contain; filter: drop-shadow(0 4px 5px rgba(60, 40, 20, 0.18)); }
+.bottle-xs { width: 22px; height: 30px; flex: none; }
+.bottle-xxs { width: 14px; height: 20px; flex: none; }
+.bottle-xs svg, .bottle-xxs svg, .bottle-xs img, .bottle-xxs img { filter: none; }
+
+/* ---------- perfume shelf ---------- */
+.shelf-filter { margin-bottom: 22px; }
+.shelves {
+  border-radius: 22px; padding: 26px 26px 10px;
+  background: linear-gradient(180deg, #f6f1ea 0%, #efe7dc 100%);
+  border: 1px solid #e6dccd;
+  box-shadow: inset 0 2px 14px rgba(120, 90, 60, 0.06);
+}
+.shelf { display: grid; position: relative; padding: 0 4px; margin-bottom: 30px; align-items: end; }
+.shelf-plank {
+  position: absolute; left: -12px; right: -12px; bottom: 54px; height: 14px; z-index: 0;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #e3cfb3 0%, #d5bb98 55%, #c4a47c 100%);
+  box-shadow: 0 7px 10px -4px rgba(100, 70, 40, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+.shelf-plank::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 8px; background: linear-gradient(180deg, rgba(120, 85, 50, 0.16), transparent); }
+.shelf-item {
+  position: relative; z-index: 1; border: 0; background: none; padding: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 0; cursor: pointer; color: var(--ink); min-width: 0;
+}
+.shelf-bottle { height: 122px; width: 84px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 12px; transition: transform 0.25s ease; }
+.shelf-item:hover .shelf-bottle, .shelf-item:focus-visible .shelf-bottle { transform: translateY(-5px); }
+.shelf-label { height: 54px; padding-top: 10px; display: flex; flex-direction: column; align-items: center; text-align: center; width: 100%; line-height: 1.2; font-size: 12px; color: var(--ink-2); }
+.shelf-label b { font-family: var(--serif); font-size: 16px; font-weight: 600; color: var(--ink); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shelf-label > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shelf-meta { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; margin-top: 1px; }
+.shelf-add-slot { width: 56px; height: 86px; border: 1.5px dashed #cdb89b; border-radius: 12px; display: grid; place-items: center; color: #a88e6c; transition: background 0.2s; }
+.shelf-add:hover .shelf-add-slot { background: rgba(255, 255, 255, 0.55); }
+.shelf-add .shelf-label { color: var(--muted); }
+.perfume-preview { aspect-ratio: 3 / 4; display: grid; place-items: center; padding: 28px; }
+.perfume-preview .bottle { height: 100%; max-height: 300px; }
+
+/* ---------- perfume picker / chips ---------- */
+.perfume-picks { display: flex; flex-wrap: wrap; gap: 8px; }
+.perfume-pick {
+  display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 6px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--surface); font-size: 13px; color: var(--ink-2); cursor: pointer; max-width: 100%;
+}
+.perfume-pick span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.perfume-pick:hover { border-color: var(--line-2); }
+.perfume-pick.is-on { border-color: var(--ink); background: var(--ink); color: #fff; }
+.perfume-pick.is-on .bottle-xs { background: rgba(255, 255, 255, 0.9); border-radius: 6px; }
+.perfume-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.perfume-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 3px 10px 3px 6px; border-radius: 999px; background: #f4ece2; color: #6b4f33; }
+.perfume-chip.is-missing { padding-left: 10px; color: var(--muted); background: var(--surface-2); font-style: italic; }
+.perfume-day { margin: 18px 0 8px; }
+.perfume-day .panel-head { margin-bottom: 8px; }
+.perfume-day .panel-sub { margin: 0; }
+.stage-aroma { position: absolute; top: 14px; left: 14px; z-index: 5; display: flex; flex-direction: column; gap: 4px; background: rgba(255, 255, 255, 0.85); padding: 7px 10px; border-radius: 12px; box-shadow: var(--shadow); max-width: 46%; }
+.stage-aroma .muted { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* ---------- diary ---------- */
+.diary-cal-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, 1fr); gap: 22px; align-items: start; }
+.calendar { padding: 18px 18px 20px; }
+.cal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.cal-title { flex: 1; display: flex; flex-direction: column; align-items: center; }
+.cal-title b { font-family: var(--serif); font-size: 26px; font-weight: 600; line-height: 1.1; }
+.cal-today { order: -1; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.cal-wd { text-align: center; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-bottom: 4px; }
+.cal-wd.is-weekend { color: var(--accent); }
+.cal-day {
+  position: relative; aspect-ratio: 3 / 4; border: 1px solid var(--line); border-radius: 12px; background: #fdfcfa;
+  padding: 0; cursor: pointer; overflow: hidden; color: var(--ink); transition: border-color 0.15s, box-shadow 0.15s;
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.cal-day:hover { border-color: var(--line-2); }
+.cal-day.is-out { background: transparent; border-color: transparent; color: #c4bcb2; }
+.cal-day.is-out.has-entries { border-color: var(--line); opacity: 0.6; }
+.cal-day.has-entries { background: radial-gradient(ellipse at 50% 35%, #fff 0%, #f4efe8 80%); }
+.cal-day.is-today .cal-num { background: var(--accent); color: #fff; }
+.cal-day.is-selected { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.cal-num { position: absolute; top: 5px; left: 6px; z-index: 2; font-size: 12px; font-weight: 600; min-width: 20px; height: 20px; border-radius: 10px; display: grid; place-items: center; padding: 0 4px; }
+.cal-thumb { position: absolute; inset: 14px 4px 3px; display: flex; justify-content: center; }
+.cal-thumb .stage { height: 100%; }
+.cal-thumb-perfume { align-items: center; }
+.cal-thumb-perfume .bottle-xs { width: 30px; height: 42px; }
+.cal-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-bottom: 12px; }
+.cal-count { position: absolute; top: 5px; right: 5px; z-index: 2; font-size: 10.5px; font-weight: 700; background: var(--ink); color: #fff; border-radius: 9px; min-width: 18px; height: 18px; display: grid; place-items: center; padding: 0 4px; }
+.day-panel { position: sticky; top: calc(var(--topbar) + 20px); }
+.day-title { font-family: var(--serif); font-size: 24px; font-weight: 600; text-transform: none; letter-spacing: 0; }
+.day-panel .panel-head { margin-bottom: 14px; }
+.day-entries { display: flex; flex-direction: column; gap: 12px; }
+.diary-card { display: flex; gap: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px; background: #fdfcfa; }
+.diary-thumb { width: 92px; height: 150px; flex: none; border: 1px solid var(--line); border-radius: 12px; padding: 6px 0; display: flex; justify-content: center; background: radial-gradient(ellipse at 50% 35%, #fff 0%, #f3efe9 75%); cursor: pointer; }
+.diary-thumb.is-dark { background: radial-gradient(ellipse at 50% 35%, #3a3632 0%, #262321 80%); }
+.diary-thumb .stage { height: 100%; }
+.diary-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.diary-outfit { font-family: var(--serif); font-size: 19px; font-weight: 600; line-height: 1.1; }
+.diary-items { margin: 0; font-size: 13px; color: var(--ink-2); line-height: 1.45; }
+.diary-note { margin: 0; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; padding-left: 10px; border-left: 2px solid var(--accent-soft); }
+.diary-actions { display: flex; align-items: center; gap: 4px; margin-top: auto; flex-wrap: wrap; }
+.diary-actions .icon-btn { margin-left: auto; }
+.feed { display: flex; flex-direction: column; gap: 26px; max-width: 820px; }
+.feed-date { font-family: var(--serif); font-size: 22px; font-weight: 600; margin: 0 0 10px; }
+.feed-entries { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+.diary-form { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 24px; }
+.diary-form-stage { position: relative; height: 420px; border-radius: var(--radius); border: 1px solid var(--line); display: flex; justify-content: center; padding: 14px 0; background: radial-gradient(ellipse at 50% 35%, #fff 0%, #f3efe9 75%); }
+.diary-form-stage.is-dark { background: radial-gradient(ellipse at 50% 35%, #3a3632 0%, #262321 80%); }
+.diary-form-stage .stage-hint { bottom: 50%; }
+
+/* ---------- nav: «Ещё» ---------- */
+.nav-more { display: none; }
+.nav-icon-only .nav-label { display: none; }
+.nav-icon-only { padding: 9px 11px; }
+.more-backdrop { display: none; }
+@media (max-width: 1320px) {
+  .nav-btn { padding: 9px 12px; gap: 6px; }
+  .topbar { padding: 0 22px; }
+}
+@media (max-width: 1100px) and (min-width: 901px) {
+  .nav-btn:not(.nav-icon-only) .nav-icon { display: none; }
+  .brand-name { display: none; }
+}
+@media (max-width: 1180px) {
+  .diary-cal-layout { grid-template-columns: 1fr; }
+  .day-panel { position: static; }
+}
+@media (max-width: 900px) {
+  .nav-in-more { display: none; }
+  .nav-more { display: flex; }
+  .nav-icon-only .nav-label { display: inline; }
+  .more-backdrop { display: block; position: fixed; inset: 0; z-index: 55; background: rgba(40, 32, 25, 0.22); animation: fade 0.2s ease; }
+  .more-sheet {
+    position: absolute; left: 10px; right: 10px; bottom: calc(76px + env(safe-area-inset-bottom));
+    background: var(--surface); border-radius: 20px; box-shadow: var(--shadow-lg); padding: 8px;
+    display: flex; flex-direction: column; animation: rise 0.22s ease;
+  }
+  .more-item { display: flex; align-items: center; gap: 14px; border: 0; background: none; padding: 14px 16px; border-radius: 14px; font-size: 16px; font-weight: 500; color: var(--ink); text-align: left; }
+  .more-item.is-on { background: var(--surface-2); }
+  .nav-btn { padding: 6px 2px; }
+
+  .shelves { padding: 18px 12px 4px; border-radius: 18px; margin: 0 -6px; }
+  .shelf-bottle { height: 96px; width: 64px; }
+  .shelf-label b { font-size: 14px; }
+  .calendar { padding: 12px 8px 14px; margin: 0 -8px; }
+  .cal-grid { gap: 3px; }
+  .cal-day { border-radius: 8px; }
+  .cal-num { top: 2px; left: 2px; font-size: 11px; min-width: 18px; height: 18px; }
+  .cal-thumb { inset: 12px 1px 2px; }
+  .cal-count { top: 2px; right: 2px; min-width: 15px; height: 15px; font-size: 9.5px; }
+  .cal-title b { font-size: 22px; }
+  .feed-entries { grid-template-columns: 1fr; }
+  .diary-form { grid-template-columns: 1fr; gap: 16px; }
+  .diary-form-stage { height: 260px; }
+  .diary-thumb { width: 78px; height: 128px; }
+  .stage-aroma { top: 10px; left: 10px; }
+}
+.day-title::first-letter, .feed-date::first-letter { text-transform: uppercase; }
+.cal-day { aspect-ratio: 5 / 6; }
+@media (max-width: 900px) { .cal-day { aspect-ratio: 3 / 4; } }

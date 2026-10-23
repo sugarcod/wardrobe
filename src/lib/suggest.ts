@@ -3,18 +3,55 @@ import { normalizeText } from './util';
 
 interface Rule<T> { value: T; keys: string[] }
 
-// Порядок важен: более специфичные категории — раньше
-const CATEGORY_RULES: Rule<Category>[] = [
-  { value: 'dress', keys: ['dress', 'jumpsuit', 'overall', 'romper', 'sundress', 'платье', 'платьиц', 'комбинезон', 'сарафан'] },
-  { value: 'outerwear', keys: ['coat', 'jacket', 'blazer', 'parka', 'trench', 'puffer', 'cardigan', 'vest', 'bomber', 'windbreaker', 'пальто', 'куртк', 'пиджак', 'жакет', 'парка', 'тренч', 'пуховик', 'кардиган', 'жилет', 'бомбер', 'ветровк', 'шуба', 'дубленк', 'косух'] },
-  { value: 'bottom', keys: ['jeans', 'pants', 'sweatpants', 'trackpants', 'trousers', 'shorts', 'skirt', 'leggings', 'joggers', 'chinos', 'джинс', 'брюк', 'штаны', 'шорт', 'юбк', 'леггинс', 'лосин', 'джогер', 'чинос'] },
-  { value: 'shoes', keys: ['shoe', 'sneaker', 'boot', 'heel', 'sandal', 'loafer', 'flats', 'trainer', 'pumps', 'туфл', 'кроссовк', 'кеды', 'ботин', 'сапог', 'сапоги', 'босоножк', 'сандал', 'лофер', 'балетк', 'мокасин', 'ботильон', 'сникер', 'мюли', 'обувь'] },
-  { value: 'bag', keys: ['bag', 'handbag', 'backpack', 'clutch', 'tote', 'purse', 'сумк', 'рюкзак', 'клатч', 'шоппер'] },
-  { value: 'hat', keys: ['hat', 'cap', 'beanie', 'beret', 'panama', 'шапк', 'кепк', 'шляп', 'берет', 'панам', 'бейсболк'] },
-  { value: 'jewelry', keys: ['necklace', 'earring', 'bracelet', 'ring', 'chain', 'jewel', 'pendant', 'колье', 'серьг', 'браслет', 'кольцо', 'цепочк', 'ожерель', 'подвеск', 'бусы', 'кулон', 'украшен'] },
-  { value: 'other', keys: ['scarf', 'belt', 'glasses', 'sunglasses', 'tie', 'шарф', 'ремен', 'ремн', 'очки', 'платок', 'галстук', 'перчатк'] },
-  { value: 'top', keys: ['shirt', 'tshirt', 'tee', 'top', 'blouse', 'sweater', 'hoodie', 'sweatshirt', 'longsleeve', 'polo', 'turtleneck', 'jumper', 'pullover', 'tank', 'футболк', 'рубашк', 'блузк', 'блуза', 'свитер', 'худи', 'толстовк', 'топ', 'водолазк', 'лонгслив', 'джемпер', 'кофт', 'майк', 'поло', 'свитшот', 'пуловер'] },
+// Порядок важен: более специфичные правила — раньше (свитшот раньше рубашки, куртка раньше рубашки…)
+type KindRule = Rule<{ category: Category; subtype?: string }>;
+const k = (category: Category, subtype: string | undefined, keys: string[]): KindRule => ({ value: { category, subtype }, keys });
+const CATEGORY_RULES: KindRule[] = [
+  k('dress', undefined, ['dress', 'jumpsuit', 'overall', 'romper', 'sundress', 'платье', 'платьиц', 'комбинезон', 'сарафан']),
+  k('outerwear', 'puffer', ['puffer', 'down-jacket', 'downjacket', 'пуховик']),
+  k('outerwear', 'trench', ['trench', 'тренч']),
+  k('outerwear', 'coat', ['coat', 'overcoat', 'parka', 'пальто', 'парка', 'шуба', 'дубленк']),
+  k('outerwear', 'windbreaker', ['windbreaker', 'raincoat', 'anorak', 'дождевик', 'ветровк', 'анорак']),
+  k('top', 'blazer', ['blazer', 'пиджак', 'жакет']),
+  k('outerwear', 'jacket', ['jacket', 'bomber', 'куртк', 'бомбер', 'косух']),
+  k('bottom', undefined, ['jeans', 'pants', 'sweatpants', 'trackpants', 'trousers', 'shorts', 'skirt', 'leggings', 'joggers', 'chinos', 'джинс', 'брюк', 'штаны', 'шорт', 'юбк', 'леггинс', 'лосин', 'джогер', 'чинос']),
+  k('shoes', undefined, ['shoe', 'sneaker', 'boot', 'heel', 'sandal', 'loafer', 'flats', 'trainer', 'pumps', 'туфл', 'кроссовк', 'кеды', 'ботин', 'сапог', 'сапоги', 'босоножк', 'сандал', 'лофер', 'балетк', 'мокасин', 'ботильон', 'сникер', 'мюли', 'обувь']),
+  k('bag', 'backpack', ['backpack', 'rucksack', 'рюкзак']),
+  k('bag', 'briefcase', ['briefcase', 'portfolio', 'портфел', 'дипломат']),
+  k('bag', 'clutch', ['clutch', 'клатч']),
+  k('bag', 'handbag', ['bag', 'handbag', 'tote', 'purse', 'сумк', 'шоппер']),
+  k('hat', 'panama', ['panama', 'bucket', 'панам']),
+  k('hat', 'cap', ['cap', 'baseball', 'кепк', 'бейсболк']),
+  k('hat', 'beanie', ['beanie', 'шапк', 'берет', 'beret']),
+  k('hat', 'hat', ['hat', 'fedora', 'шляп']),
+  k('jewelry', 'watch', ['watch', 'часы', 'часик']),
+  k('jewelry', 'earrings', ['earring', 'серьг', 'сережк']),
+  k('jewelry', 'bracelet', ['bracelet', 'bangle', 'браслет']),
+  k('jewelry', 'ring', ['ring', 'кольц', 'перстен']),
+  k('jewelry', 'necklace', ['necklace', 'chain', 'pendant', 'колье', 'цеп', 'ожерель', 'подвеск', 'бусы', 'кулон']),
+  k('jewelry', 'jewel', ['jewel', 'brooch', 'брошь', 'брошк', 'украшен']),
+  k('other', 'glasses', ['glasses', 'sunglasses', 'очки']),
+  k('other', 'belt', ['belt', 'ремен', 'ремн', 'пояс']),
+  k('other', 'scarf', ['scarf', 'шарф', 'платок', 'палантин']),
+  k('other', 'accessory', ['tie', 'gloves', 'галстук', 'перчатк']),
+  k('top', 'cardigan', ['cardigan', 'кардиган']),
+  k('top', 'vest', ['vest', 'gilet', 'жилет']),
+  k('top', 'hoodie', ['hoodie', 'худи', 'толстовк']),
+  k('top', 'sweatshirt', ['sweatshirt', 'свитшот']),
+  k('top', 'jumper', ['jumper', 'pullover', 'джемпер', 'пуловер', 'кофт']),
+  k('top', 'sweater', ['sweater', 'knit', 'свитер']),
+  k('top', 'longsleeve', ['longsleeve', 'turtleneck', 'лонгслив', 'водолазк']),
+  k('top', 'blouse', ['blouse', 'блузк', 'блуза']),
+  k('top', 'shirt', ['shirt', 'рубашк', 'сорочк']),
+  k('top', 'tank', ['tank', 'singlet', 'майк']),
+  k('top', 'croptop', ['top', 'crop', 'топ']),
+  k('top', 'tshirt', ['tshirt', 'tee', 'polo', 'футболк', 'поло']),
 ];
+
+/** Вид вещи по названию (для миграции старых вещей без подтипа) */
+export function kindFromName(name: string): { category: Category; subtype?: string } | undefined {
+  return match(name, CATEGORY_RULES);
+}
 
 const SEASON_RULES: Rule<Season>[] = [
   { value: 'winter', keys: ['winter', 'wool', 'puffer', 'down', 'зим', 'шерст', 'пуховик', 'шуба', 'дубленк', 'валенк', 'теплы', 'тепла'] },
@@ -77,6 +114,7 @@ function match<T>(name: string, rules: Rule<T>[]): T | undefined {
 export interface FilenameHints {
   name: string;
   category?: Category;
+  subtype?: string;
   season?: Season;
   occasion?: Occasion;
   color?: string;
@@ -87,7 +125,10 @@ export function hintsFromFilename(fileName: string): FilenameHints {
   const pretty = /^(img|dsc|photo|image|screenshot|pxl)[\s-]?\d/i.test(clean) || /^\d+$/.test(clean) ? '' : clean;
   return {
     name: pretty ? pretty.charAt(0).toUpperCase() + pretty.slice(1) : '',
-    category: match(fileName, CATEGORY_RULES),
+    ...(() => {
+      const kind = match(fileName, CATEGORY_RULES);
+      return kind ? { category: kind.category, subtype: kind.subtype } : {};
+    })(),
     season: match(fileName, SEASON_RULES),
     occasion: match(fileName, OCCASION_RULES),
     color: match(fileName, COLOR_RULES),

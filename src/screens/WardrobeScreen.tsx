@@ -7,7 +7,7 @@ import { useApp } from '../nav';
 import { pluralRu } from '../lib/util';
 
 export function WardrobeScreen() {
-  const { items, draft } = useStore();
+  const { items, draft, wearStats } = useStore();
   const { pickFiles, openItem } = useApp();
   const { filter, setFilter, result } = useFilter(items);
   const worn = new Set(draft.layers.map((l) => l.itemId));
@@ -47,7 +47,7 @@ export function WardrobeScreen() {
           {result.length ? (
             <div className="grid">
               {result.map((it) => (
-                <ItemCard key={it.id} item={it} active={worn.has(it.id)} onClick={() => openItem(it)} />
+                <ItemCard key={it.id} item={it} active={worn.has(it.id)} stat={wearStats.get(it.id)} onClick={() => openItem(it)} />
               ))}
             </div>
           ) : (

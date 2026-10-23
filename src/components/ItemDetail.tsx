@@ -5,7 +5,7 @@ import { BgFixer } from './BgFixer';
 import { validateFile } from '../lib/image';
 import { processFile, type Processed } from '../lib/process';
 import { CATEGORY_BY_ID } from '../constants';
-import { formatDate, pluralRu } from '../lib/util';
+import { relativeDay, formatDate, pluralRu } from '../lib/util';
 import { useStore } from '../store';
 import { useUI } from '../ui';
 import type { Item } from '../types';
@@ -17,11 +17,13 @@ interface Props {
 }
 
 export function ItemDetail({ item, onClose, onWear }: Props) {
-  const { updateItem, deleteItem, outfits, draft } = useStore();
+  const { updateItem, deleteItem, outfits, draft, wearStats } = useStore();
+  const stat = wearStats.get(item.id);
   const { toast, confirm } = useUI();
   const [fields, setFields] = useState<ItemFields>({
     name: item.name,
     category: item.category,
+    subtype: item.subtype ?? '',
     color: item.color,
     season: item.season,
     occasion: item.occasion ?? '',
@@ -52,11 +54,13 @@ export function ItemDetail({ item, onClose, onWear }: Props) {
       ...item,
       name: fields.name.trim(),
       category: fields.category,
+      subtype: fields.subtype || undefined,
       color: fields.color,
       season: fields.season,
       tags: fields.tags,
       imageDataUrl: image,
     };
+    if (!next.subtype) delete next.subtype;
     if (fields.occasion) next.occasion = fields.occasion;
     else delete next.occasion;
     setBusy(true);
@@ -103,6 +107,9 @@ export function ItemDetail({ item, onClose, onWear }: Props) {
             <BgFixer key={replacement.sourceDataUrl.length} sourceDataUrl={replacement.sourceDataUrl} onChange={(r) => setImage(r.dataUrl)} />
           )}
           <p className="muted small">Добавлено {formatDate(item.createdAt)}</p>
+          <p className="wear-stat small" data-testid="item-wear-stat">
+            {stat ? <>Надевали {stat.count} {pluralRu(stat.count, 'раз', 'раза', 'раз')}, последний — {relativeDay(stat.last)}</> : 'В дневнике пока не отмечена'}
+          </p>
         </div>
         <div className="detail-form">
           <ItemForm value={fields} onChange={setFields} showErrors />

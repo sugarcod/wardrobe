@@ -1,40 +1,55 @@
+import { todayISO } from './util';
 import { CATEGORY_BY_ID } from '../constants';
+import { levelOf, slotOf } from '../catalog';
 import type { Category, Item, Layer, Occasion, Season } from '../types';
 import { colorLabel, isNeutral } from './colors';
 
-export function newLayer(itemId: string): Layer {
-  return { itemId, x: 0, y: 0, scale: 1, flip: false };
+export function newLayer(itemId: string, x = 0, y = 0): Layer {
+  return { itemId, x, y, scale: 1, flip: false };
 }
 
+/** Сортировка слоёв снизу вверх по порядку зон; внутри зоны — порядок надевания */
 export function sortLayers(layers: Layer[], items: Map<string, Item>): Layer[] {
-  return [...layers].sort((a, b) => {
-    const ca = items.get(a.itemId), cb = items.get(b.itemId);
-    const oa = ca ? CATEGORY_BY_ID[ca.category].order : 99;
-    const ob = cb ? CATEGORY_BY_ID[cb.category].order : 99;
-    return oa - ob;
-  });
+  return layers
+    .map((l, i) => ({ l, i }))
+    .sort((a, b) => {
+      const ia = items.get(a.l.itemId), ib = items.get(b.l.itemId);
+      const oa = ia ? slotOf(ia).order : 999;
+      const ob = ib ? slotOf(ib).order : 999;
+      return oa - ob || a.i - b.i;
+    })
+    .map((x) => x.l);
 }
 
 /**
  * Надевает вещь по правилам:
- * - в зоне одна вещь (кроме украшений и «другого»), новая заменяет старую той же категории;
- * - платье снимает верх и низ, верх/низ снимают платье;
+ * - в каждой зоне (слоте) своё число вещей: обычно одна, кольца/браслеты/цепочки — несколько;
+ *   новая вещь заменяет старую (в стековом слоте — самую раннюю, если места нет);
+ * - торс многослойный: базовый (футболка) + средний (свитер) + верхний (куртка) одновременно;
+ * - платье снимает базовый верх и низ, базовый верх или низ снимают платье;
  * - повторный клик по надетой вещи снимает её.
  */
 export function wear(layers: Layer[], item: Item, items: Map<string, Item>): Layer[] {
   if (layers.some((l) => l.itemId === item.id)) {
     return layers.filter((l) => l.itemId !== item.id);
   }
-  const info = CATEGORY_BY_ID[item.category];
-  const conflicts = new Set<Category>();
-  if (!info.stackable) conflicts.add(item.category);
-  if (item.category === 'dress') { conflicts.add('top'); conflicts.add('bottom'); }
-  if (item.category === 'top' || item.category === 'bottom') conflicts.add('dress');
-  const kept = layers.filter((l) => {
+  const info = slotOf(item);
+  const conflictSlots = new Set<string>();
+  if (info.slot === 'dress') { conflictSlots.add('torso-base'); conflictSlots.add('bottom'); }
+  if (info.slot === 'torso-base' || info.slot === 'bottom') conflictSlots.add('dress');
+  let kept = layers.filter((l) => {
     const it = items.get(l.itemId);
-    return it && !conflicts.has(it.category);
+    return it && !conflictSlots.has(slotOf(it).slot);
   });
-  return sortLayers([...kept, newLayer(item.id)], items);
+  const same = kept.filter((l) => slotOf(items.get(l.itemId)!).slot === info.slot);
+  if (same.length >= info.max) {
+    const drop = new Set(same.slice(0, same.length - info.max + 1).map((l) => l.itemId));
+    kept = kept.filter((l) => !drop.has(l.itemId));
+  }
+  // в стеке каждая следующая вещь чуть смещена, чтобы были видны все
+  const n = kept.filter((l) => slotOf(items.get(l.itemId)!).slot === info.slot).length;
+  const layer = newLayer(item.id, (info.stepX ?? 0) * n, (info.stepY ?? 0) * n);
+  return sortLayers([...kept, layer], items);
 }
 
 export function cleanLayers(layers: Layer[], items: Map<string, Item>) {
@@ -46,6 +61,25 @@ export function cleanLayers(layers: Layer[], items: Map<string, Item>) {
 export interface SuggestOptions {
   season: Exclude<Season, 'all'>;
   occasion: Occasion;
+  /** когда вещь надевали последний раз (id → YYYY-MM-DD), чтобы реже повторяться */
+  recent?: Map<string, string>;
+  today?: string;
+}
+
+/** Группа для подбора: верх делится на базовый и средний слой */
+type Group = Category | 'mid';
+function groupOf(it: Item): Group {
+  return it.category === 'top' && levelOf(it) === 'mid' ? 'mid' : it.category;
+}
+
+/** Недавно надетые вещи получают меньший вес */
+export function recencyWeight(last: string | undefined, today: string): number {
+  if (!last) return 1;
+  const days = Math.round((Date.parse(today) - Date.parse(last)) / 86400000);
+  if (!Number.isFinite(days) || days < 0) return 1;
+  if (days <= 2) return 0.3;
+  if (days <= 6) return 0.6;
+  return 1;
 }
 
 export interface Suggestion {
@@ -85,10 +119,11 @@ function occasionScore(it: Item, o: Occasion): number {
 
 interface Cand { item: Item; w: number }
 
-function pool(items: Item[], cat: Category, opt: SuggestOptions, relaxed: boolean): Cand[] {
+function pool(items: Item[], cat: Group, opt: SuggestOptions, relaxed: boolean): Cand[] {
   const out: Cand[] = [];
+  const today = opt.today ?? todayISO();
   for (const it of items) {
-    if (it.category !== cat) continue;
+    if (groupOf(it) !== cat) continue;
     const s = seasonScore(it, opt.season);
     if (s === 0) continue;
     let o = occasionScore(it, opt.occasion);
@@ -96,7 +131,7 @@ function pool(items: Item[], cat: Category, opt: SuggestOptions, relaxed: boolea
       if (!relaxed) continue;
       o = 0.1;
     }
-    out.push({ item: it, w: s * o });
+    out.push({ item: it, w: s * o * recencyWeight(opt.recent?.get(it.id), today) });
   }
   return out;
 }
@@ -140,23 +175,24 @@ export function suggestOutfit(allItems: Item[], opt: SuggestOptions, avoidSignat
     const colors = new Set<string>();
     let score = 0;
 
-    const take = (cat: Category, required: boolean): boolean => {
+    const take = (cat: Group, required: boolean): boolean => {
       let cands = pool(allItems, cat, opt, false);
       let relaxed = false;
       if (!cands.length && required) {
         cands = pool(allItems, cat, opt, true);
         relaxed = cands.length > 0;
       }
-      const allowed = cands.filter((c) => harmonyAllows(c.item.color, colors) && !picked.includes(c.item));
+      const usedSlots = new Set(picked.map((p) => slotOf(p)).filter((x) => x.max === 1).map((x) => x.slot));
+      const allowed = cands.filter((c) => harmonyAllows(c.item.color, colors) && !picked.includes(c.item) && !usedSlots.has(slotOf(c.item).slot));
       const it = weightedPick(allowed, rnd);
       if (!it) {
         if (required) {
-          const label = CATEGORY_BY_ID[cat].label.toLowerCase();
+          const label = cat === 'mid' ? 'средний слой' : CATEGORY_BY_ID[cat].label.toLowerCase();
           notes.push(cands.length ? `Не удалось подобрать «${label}» по цвету — попробуйте ещё вариант.` : `Нет подходящей вещи «${label}» для ${SEASON_IN[opt.season]}.`);
         }
         return false;
       }
-      if (relaxed) notes.push(`«${it.name || CATEGORY_BY_ID[cat].label}» отмечена для другого повода — взята как запасной вариант.`);
+      if (relaxed) notes.push(`«${it.name || CATEGORY_BY_ID[it.category].label}» отмечена для другого повода — взята как запасной вариант.`);
       picked.push(it);
       if (it.color && !isNeutral(it.color)) colors.add(it.color);
       score += relaxed ? 1 : 3;
@@ -187,6 +223,8 @@ export function suggestOutfit(allItems: Item[], opt: SuggestOptions, avoidSignat
       take('top', true);
     }
 
+    const midP = { winter: 0.85, autumn: 0.65, spring: 0.4, summer: 0.05 }[opt.season];
+    if (opt.occasion !== 'sport' && rnd() < midP) take('mid', false);
     const outerP = { winter: 1, autumn: 0.85, spring: 0.6, summer: 0.08 }[opt.season];
     if (rnd() < outerP) take('outerwear', opt.season === 'winter');
     take('shoes', true);
@@ -206,7 +244,7 @@ export function suggestOutfit(allItems: Item[], opt: SuggestOptions, avoidSignat
 
   if (!best || !best.picked.length) return null;
   const map = new Map(allItems.map((i) => [i.id, i]));
-  const layers = sortLayers(best.picked.map((p) => newLayer(p.id)), map);
+  const layers = best.picked.reduce<Layer[]>((ls, it) => wear(ls, it, map), []);
   const colors = best.picked.map((p) => p.color);
   const notes = [...new Set(best.notes)];
   return {

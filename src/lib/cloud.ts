@@ -6,6 +6,8 @@
  *   users/{uid}/items/{id}    — метаданные вещи + updatedAt, deleted, imageRev
  *   users/{uid}/images/{id}   — { dataUrl (base64 WebP, ≤ ~700 КБ), rev, updatedAt }
  *   users/{uid}/outfits/{id}  — образ + updatedAt, deleted
+ *   users/{uid}/perfumes/{id} — парфюм; фото (если есть) — в users/{uid}/perfumeImages/{id}
+ *   users/{uid}/diary/{id}    — запись дневника (копия слоёв, парфюмы, заметка)
  */
 import { initializeApp, type FirebaseOptions } from 'firebase/app';
 import {
@@ -37,7 +39,7 @@ import {
   type QuerySnapshot,
   type DocumentData,
 } from 'firebase/firestore';
-import type { Item, Outfit, Tombstone } from '../types';
+import type { SyncKind, Tombstone } from '../types';
 import { planMerge, shouldApplyRemote, type SyncRec } from './syncMerge';
 import { fitDataUrl } from './image';
 
@@ -50,28 +52,58 @@ export interface CloudUser {
 
 export type SyncStatus = 'syncing' | 'synced' | 'offline' | 'error';
 
+/** Любая синхронизируемая запись (вещь, образ, парфюм, запись дневника) */
+export interface SyncRecord {
+  id: string;
+  createdAt: string;
+  updatedAt?: string;
+  imageRev?: string;
+  imageDataUrl?: string;
+}
+
+interface KindCfg {
+  kind: SyncKind;
+  col: string;
+  /** коллекция с картинками (base64), если у записей бывают фото */
+  imageCol?: string;
+  /** без картинки запись не имеет смысла (вещь) */
+  imageRequired?: boolean;
+}
+
+export const KINDS: KindCfg[] = [
+  { kind: 'item', col: 'items', imageCol: 'images', imageRequired: true },
+  { kind: 'outfit', col: 'outfits' },
+  { kind: 'perfume', col: 'perfumes', imageCol: 'perfumeImages' },
+  { kind: 'diary', col: 'diary' },
+];
+const CFG = Object.fromEntries(KINDS.map((k) => [k.kind, k])) as Record<SyncKind, KindCfg>;
+
+export interface RemoteUpsert {
+  kind: SyncKind;
+  rec: SyncRecord;
+  /** новая картинка (data URL), если она изменилась */
+  imageDataUrl?: string;
+  /** картинку удалили на другом устройстве */
+  removeImage?: boolean;
+}
+
 export interface RemoteChanges {
-  /** imageDataUrl — новая картинка (data URL), если она изменилась */
-  items: { item: Item; imageDataUrl?: string }[];
-  outfits: Outfit[];
-  deletedItems: { id: string; updatedAt: string }[];
-  deletedOutfits: { id: string; updatedAt: string }[];
+  upserts: RemoteUpsert[];
+  deletes: { kind: SyncKind; id: string; updatedAt: string }[];
 }
 
 export interface LocalAdapter {
-  getLocal(): Promise<{ items: Item[]; outfits: Outfit[]; tombstones: Tombstone[] }>;
-  imageToDataUrl(item: Item): Promise<string>;
+  getLocal(): Promise<{ records: Record<SyncKind, SyncRecord[]>; tombstones: Tombstone[] }>;
+  imageToDataUrl(kind: SyncKind, rec: SyncRecord): Promise<string>;
   applyRemote(c: RemoteChanges): Promise<void>;
 }
 
 export interface SyncHandle {
-  pushItem(item: Item, imageChanged: boolean): void;
-  pushOutfit(o: Outfit): void;
-  pushDelete(kind: 'item' | 'outfit', id: string, updatedAt: string): void;
+  push(kind: SyncKind, rec: SyncRecord, imageChanged?: boolean): void;
+  pushDelete(kind: SyncKind, id: string, updatedAt: string): void;
 }
 
-type CloudItem = Omit<Item, 'imageDataUrl'> & { updatedAt: string; deleted?: boolean };
-type CloudOutfit = Outfit & { updatedAt: string; deleted?: boolean };
+type CloudRec = SyncRecord & { updatedAt: string; deleted?: boolean };
 
 const isMobile = () => /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
@@ -166,10 +198,10 @@ export class CloudSync implements SyncHandle {
     this.onStatus = onStatus;
   }
 
-  private col(name: 'items' | 'images' | 'outfits') {
+  private col(name: string) {
     return collection(this.db, 'users', this.uid, name);
   }
-  private ref(name: 'items' | 'images' | 'outfits', id: string) {
+  private ref(name: string, id: string) {
     return doc(this.db, 'users', this.uid, name, id);
   }
 
@@ -207,10 +239,11 @@ export class CloudSync implements SyncHandle {
     if (this.stopped) return;
     this.ready = true;
     this.emit();
-    this.unsubs.push(
-      onSnapshot(this.col('items'), (snap) => this.enqueue(() => this.onItems(snap)), (e) => { this.failed = true; this.emit(); console.warn(e); }),
-      onSnapshot(this.col('outfits'), (snap) => this.enqueue(() => this.onOutfits(snap)), (e) => { this.failed = true; this.emit(); console.warn(e); }),
-    );
+    for (const cfg of KINDS) {
+      this.unsubs.push(
+        onSnapshot(this.col(cfg.col), (snap) => this.enqueue(() => this.onSnap(cfg, snap)), (e) => { this.failed = true; this.emit(); console.warn(e); }),
+      );
+    }
   }
 
   stop() {
@@ -223,146 +256,120 @@ export class CloudSync implements SyncHandle {
 
   // ---------- первичное слияние ----------
   private async initialMerge() {
-    const [ri, ro] = await Promise.all([getDocs(this.col('items')), getDocs(this.col('outfits'))]);
-    const { items, outfits, tombstones } = await this.local.getLocal();
-    const remoteItems = new Map(ri.docs.map((d) => [d.id, { ...(d.data() as CloudItem), id: d.id }]));
-    const remoteOutfits = new Map(ro.docs.map((d) => [d.id, { ...(d.data() as CloudOutfit), id: d.id }]));
-    const localItems = new Map(items.map((i) => [i.id, i]));
-    const localOutfits = new Map(outfits.map((o) => [o.id, o]));
-    const tombItems = tombstones.filter((t) => t.kind === 'item');
-    const tombOutfits = tombstones.filter((t) => t.kind === 'outfit');
+    const snaps = await Promise.all(KINDS.map((k) => getDocs(this.col(k.col))));
+    const { records, tombstones } = await this.local.getLocal();
+    const changes: RemoteChanges = { upserts: [], deletes: [] };
+    const uploads: (() => Promise<unknown>)[] = [];
 
-    const recs = (live: { id: string; updatedAt?: string; createdAt: string }[], tombs: Tombstone[]): SyncRec[] => [
-      ...live.map((r) => ({ id: r.id, updatedAt: r.updatedAt ?? r.createdAt })),
-      ...tombs.filter((t) => !live.some((l) => l.id === t.id)).map((t) => ({ id: t.id, updatedAt: t.updatedAt, deleted: true })),
-    ];
-    const asRemote = (m: Map<string, { id: string; updatedAt: string; deleted?: boolean; createdAt?: string }>): SyncRec[] =>
-      [...m.values()].map((r) => ({ id: r.id, updatedAt: r.updatedAt ?? r.createdAt ?? '', deleted: !!r.deleted }));
+    for (let i = 0; i < KINDS.length; i++) {
+      const cfg = KINDS[i];
+      const remote = new Map(snaps[i].docs.map((d) => [d.id, { ...(d.data() as CloudRec), id: d.id }]));
+      const live = records[cfg.kind];
+      const localById = new Map(live.map((r) => [r.id, r]));
+      const tombs = tombstones.filter((t) => t.kind === cfg.kind);
+      const localRecs: SyncRec[] = [
+        ...live.map((r) => ({ id: r.id, updatedAt: r.updatedAt ?? r.createdAt })),
+        ...tombs.filter((t) => !localById.has(t.id)).map((t) => ({ id: t.id, updatedAt: t.updatedAt, deleted: true })),
+      ];
+      const remoteRecs: SyncRec[] = [...remote.values()].map((r) => ({ id: r.id, updatedAt: r.updatedAt ?? r.createdAt ?? '', deleted: !!r.deleted }));
+      const plan = planMerge(localRecs, remoteRecs);
 
-    const pi = planMerge(recs(items, tombItems), asRemote(remoteItems));
-    const po = planMerge(recs(outfits, tombOutfits), asRemote(remoteOutfits));
-
-    // скачать
-    const changes: RemoteChanges = { items: [], outfits: [], deletedItems: [], deletedOutfits: [] };
-    for (const id of pi.download) {
-      const r = remoteItems.get(id)!;
-      if (r.deleted) changes.deletedItems.push({ id, updatedAt: r.updatedAt });
-      else {
-        const c = await this.remoteItemChange(r, localItems.get(id));
-        if (c) changes.items.push(c);
+      for (const id of plan.download) {
+        const r = remote.get(id)!;
+        if (r.deleted) changes.deletes.push({ kind: cfg.kind, id, updatedAt: r.updatedAt });
+        else {
+          const c = await this.remoteChange(cfg, r, localById.get(id));
+          if (c) changes.upserts.push(c);
+        }
       }
-    }
-    for (const id of po.download) {
-      const r = remoteOutfits.get(id)!;
-      if (r.deleted) changes.deletedOutfits.push({ id, updatedAt: r.updatedAt });
-      else changes.outfits.push(stripCloud(r));
+      for (const id of plan.upload) {
+        const rec = localById.get(id);
+        if (rec) {
+          const imageChanged = !!cfg.imageCol && (remote.get(id)?.imageRev !== rec.imageRev || !remote.has(id));
+          uploads.push(() => this.write(cfg, rec, imageChanged));
+        } else {
+          const t = tombs.find((x) => x.id === id)!;
+          uploads.push(() => this.writeDelete(cfg.kind, id, t.updatedAt));
+        }
+      }
     }
     await this.local.applyRemote(changes);
-
-    // отправить
-    const writes: Promise<unknown>[] = [];
-    for (const id of pi.upload) {
-      const it = localItems.get(id);
-      if (it) writes.push(this.writeItem(it, remoteItems.get(id)?.imageRev !== it.imageRev || !remoteItems.has(id)));
-      else {
-        const t = tombItems.find((x) => x.id === id)!;
-        writes.push(this.writeDelete('item', id, t.updatedAt));
-      }
-    }
-    for (const id of po.upload) {
-      const o = localOutfits.get(id);
-      if (o) writes.push(this.writeOutfit(o));
-      else {
-        const t = tombOutfits.find((x) => x.id === id)!;
-        writes.push(this.writeDelete('outfit', id, t.updatedAt));
-      }
-    }
     // не ждём подтверждения сервера в офлайне — записи стоят в очереди Firestore
-    writes.forEach((w) => this.track(w).catch(() => {}));
+    uploads.forEach((w) => this.track(w()).catch(() => {}));
   }
 
-  private async remoteItemChange(r: CloudItem, local?: Item): Promise<{ item: Item; imageDataUrl?: string } | null> {
-    const item = { ...stripCloud(r), imageDataUrl: local?.imageDataUrl ?? '' } as Item;
-    if (local && local.imageRev && local.imageRev === r.imageRev) return { item };
-    const img = await getDoc(this.ref('images', r.id));
+  private async remoteChange(cfg: KindCfg, r: CloudRec, local?: SyncRecord): Promise<RemoteUpsert | null> {
+    const base = stripCloud(r) as SyncRecord;
+    if (!cfg.imageCol) return { kind: cfg.kind, rec: base };
+    const rec: SyncRecord = { ...base, imageDataUrl: local?.imageDataUrl };
+    if (!r.imageRev) {
+      // у записи нет фото (парфюм без картинки)
+      if (cfg.imageRequired) return local ? { kind: cfg.kind, rec: { ...rec, imageRev: local.imageRev } } : null;
+      return { kind: cfg.kind, rec: { ...rec, imageDataUrl: undefined, imageRev: undefined }, removeImage: !!local?.imageRev };
+    }
+    if (local && local.imageRev && local.imageRev === r.imageRev) return { kind: cfg.kind, rec };
+    const img = await getDoc(this.ref(cfg.imageCol, r.id));
     const data = img.data() as { dataUrl?: string; rev?: string } | undefined;
-    if (!data?.dataUrl) return local ? { item: { ...item, imageRev: local.imageRev } } : null; // картинка ещё не пришла
-    return { item: { ...item, imageRev: data.rev ?? r.imageRev }, imageDataUrl: data.dataUrl };
+    if (!data?.dataUrl) {
+      // картинка ещё не пришла
+      if (local) return { kind: cfg.kind, rec: { ...rec, imageRev: local.imageRev } };
+      return cfg.imageRequired ? null : { kind: cfg.kind, rec: { ...rec, imageRev: undefined, imageDataUrl: undefined } };
+    }
+    return { kind: cfg.kind, rec: { ...rec, imageRev: data.rev ?? r.imageRev }, imageDataUrl: data.dataUrl };
   }
 
   // ---------- изменения из облака ----------
-  private async onItems(snap: QuerySnapshot<DocumentData>) {
+  private async onSnap(cfg: KindCfg, snap: QuerySnapshot<DocumentData>) {
     const relevant = snap.docChanges().filter((c) => c.type !== 'removed' && !c.doc.metadata.hasPendingWrites);
     if (!relevant.length) return;
-    const { items, tombstones } = await this.local.getLocal();
-    const byId = new Map(items.map((i) => [i.id, i]));
-    const changes: RemoteChanges = { items: [], outfits: [], deletedItems: [], deletedOutfits: [] };
+    const { records, tombstones } = await this.local.getLocal();
+    const byId = new Map(records[cfg.kind].map((r) => [r.id, r]));
+    const changes: RemoteChanges = { upserts: [], deletes: [] };
     for (const c of relevant) {
-      const r = { ...(c.doc.data() as CloudItem), id: c.doc.id };
+      const r = { ...(c.doc.data() as CloudRec), id: c.doc.id };
       const l = byId.get(r.id);
-      const t = tombstones.find((x) => x.kind === 'item' && x.id === r.id);
+      const t = tombstones.find((x) => x.kind === cfg.kind && x.id === r.id);
       const localRec: SyncRec | undefined = l ? { id: l.id, updatedAt: l.updatedAt ?? l.createdAt } : t ? { id: t.id, updatedAt: t.updatedAt, deleted: true } : undefined;
       if (!shouldApplyRemote(localRec, { id: r.id, updatedAt: r.updatedAt ?? r.createdAt, deleted: !!r.deleted })) continue;
-      if (r.deleted) changes.deletedItems.push({ id: r.id, updatedAt: r.updatedAt });
+      if (r.deleted) changes.deletes.push({ kind: cfg.kind, id: r.id, updatedAt: r.updatedAt });
       else {
-        const ch = await this.remoteItemChange(r, l);
-        if (ch) changes.items.push(ch);
+        const ch = await this.remoteChange(cfg, r, l);
+        if (ch) changes.upserts.push(ch);
       }
     }
-    if (changes.items.length || changes.deletedItems.length) await this.local.applyRemote(changes);
-  }
-
-  private async onOutfits(snap: QuerySnapshot<DocumentData>) {
-    const relevant = snap.docChanges().filter((c) => c.type !== 'removed' && !c.doc.metadata.hasPendingWrites);
-    if (!relevant.length) return;
-    const { outfits, tombstones } = await this.local.getLocal();
-    const byId = new Map(outfits.map((o) => [o.id, o]));
-    const changes: RemoteChanges = { items: [], outfits: [], deletedItems: [], deletedOutfits: [] };
-    for (const c of relevant) {
-      const r = { ...(c.doc.data() as CloudOutfit), id: c.doc.id };
-      const l = byId.get(r.id);
-      const t = tombstones.find((x) => x.kind === 'outfit' && x.id === r.id);
-      const localRec: SyncRec | undefined = l ? { id: l.id, updatedAt: l.updatedAt ?? l.createdAt } : t ? { id: t.id, updatedAt: t.updatedAt, deleted: true } : undefined;
-      if (!shouldApplyRemote(localRec, { id: r.id, updatedAt: r.updatedAt ?? r.createdAt, deleted: !!r.deleted })) continue;
-      if (r.deleted) changes.deletedOutfits.push({ id: r.id, updatedAt: r.updatedAt });
-      else changes.outfits.push(stripCloud(r));
-    }
-    if (changes.outfits.length || changes.deletedOutfits.length) await this.local.applyRemote(changes);
+    if (changes.upserts.length || changes.deletes.length) await this.local.applyRemote(changes);
   }
 
   // ---------- запись в облако ----------
-  private async writeItem(item: Item, imageChanged: boolean) {
+  private async write(cfg: KindCfg, rec: SyncRecord, imageChanged: boolean) {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { imageDataUrl: _img, ...meta } = item;
-    const updatedAt = item.updatedAt ?? item.createdAt;
+    const { imageDataUrl: _img, ...meta } = rec;
+    const updatedAt = rec.updatedAt ?? rec.createdAt;
     const writes: Promise<void>[] = [];
-    if (imageChanged) {
-      const dataUrl = await fitDataUrl(await this.local.imageToDataUrl(item));
-      writes.push(setDoc(this.ref('images', item.id), { dataUrl, rev: item.imageRev ?? '', updatedAt }));
+    if (cfg.imageCol && imageChanged) {
+      if (rec.imageDataUrl && (rec.imageRev || cfg.imageRequired)) {
+        const dataUrl = await fitDataUrl(await this.local.imageToDataUrl(cfg.kind, rec));
+        writes.push(setDoc(this.ref(cfg.imageCol, rec.id), { dataUrl, rev: rec.imageRev ?? '', updatedAt }));
+      } else {
+        writes.push(deleteDoc(this.ref(cfg.imageCol, rec.id)));
+      }
     }
-    writes.push(setDoc(this.ref('items', item.id), { ...meta, updatedAt, deleted: false } satisfies CloudItem));
+    writes.push(setDoc(this.ref(cfg.col, rec.id), { ...meta, updatedAt, deleted: false }));
     await Promise.all(writes);
   }
 
-  private async writeOutfit(o: Outfit) {
-    await setDoc(this.ref('outfits', o.id), { ...o, updatedAt: o.updatedAt ?? o.createdAt, deleted: false } satisfies CloudOutfit);
-  }
-
-  private async writeDelete(kind: 'item' | 'outfit', id: string, updatedAt: string) {
-    const name = kind === 'item' ? 'items' : 'outfits';
-    const writes: Promise<void>[] = [setDoc(this.ref(name, id), { id, updatedAt, deleted: true })];
-    if (kind === 'item') writes.push(deleteDoc(this.ref('images', id)));
+  private async writeDelete(kind: SyncKind, id: string, updatedAt: string) {
+    const cfg = CFG[kind];
+    const writes: Promise<void>[] = [setDoc(this.ref(cfg.col, id), { id, updatedAt, deleted: true })];
+    if (cfg.imageCol) writes.push(deleteDoc(this.ref(cfg.imageCol, id)));
     await Promise.all(writes);
   }
 
   // ---------- SyncHandle ----------
-  pushItem(item: Item, imageChanged: boolean) {
-    if (!this.stopped) this.track(this.writeItem(item, imageChanged)).catch(() => {});
+  push(kind: SyncKind, rec: SyncRecord, imageChanged = false) {
+    if (!this.stopped) this.track(this.write(CFG[kind], rec, imageChanged)).catch(() => {});
   }
-  pushOutfit(o: Outfit) {
-    if (!this.stopped) this.track(this.writeOutfit(o)).catch(() => {});
-  }
-  pushDelete(kind: 'item' | 'outfit', id: string, updatedAt: string) {
+  pushDelete(kind: SyncKind, id: string, updatedAt: string) {
     if (!this.stopped) this.track(this.writeDelete(kind, id, updatedAt)).catch(() => {});
   }
 }

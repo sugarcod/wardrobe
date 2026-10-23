@@ -6,6 +6,8 @@ import { Empty } from '../components/Empty';
 import { Modal } from '../components/Modal';
 import { OutfitTags, itemTitle } from '../components/OutfitTags';
 import { CATEGORY_BY_ID } from '../constants';
+import { LEVEL_LABEL, kindLabel, slotOf } from '../catalog';
+import { PerfumeChips, PerfumePicker } from '../components/PerfumePicker';
 import { useStore } from '../store';
 import { useApp } from '../nav';
 import { useUI } from '../ui';
@@ -15,8 +17,9 @@ import type { Category } from '../types';
 import { PlusIcon } from './WardrobeScreen';
 
 export function BuilderScreen() {
-  const { items, itemsById, draft, outfits, prefs, setPrefs, wearItem, updateLayer, removeLayer, clearDraft, saveOutfit } = useStore();
-  const { pickFiles, navigate } = useApp();
+  const { items, itemsById, draft, outfits, prefs, setPrefs, wearItem, updateLayer, removeLayer, clearDraft, saveOutfit, setDraftPerfumes } = useStore();
+  const { pickFiles, navigate, recordDiary } = useApp();
+  const [pickPerfume, setPickPerfume] = useState(false);
   const { toast, confirm } = useUI();
   const [cat, setCat] = useState<Category | ''>('');
   const [q, setQ] = useState('');
@@ -124,6 +127,12 @@ export function BuilderScreen() {
             onSelect={setSelected}
             onMove={(id, x, y) => updateLayer(id, { x, y })}
           />
+          {(draft.perfumeIds?.length ?? 0) > 0 && (
+            <div className="stage-aroma" data-testid="stage-aroma">
+              <span className="muted small">аромат дня</span>
+              <PerfumeChips ids={draft.perfumeIds ?? []} />
+            </div>
+          )}
           {!layers.length && (
             <div className="stage-hint">
               {items.length ? 'Нажмите на вещь в гардеробе, чтобы надеть её' : 'Сначала добавьте вещи в гардероб'}
@@ -142,16 +151,30 @@ export function BuilderScreen() {
           <ul className="layers">
             {[...layers].reverse().map((l) => {
               const it = itemsById.get(l.itemId)!;
-              const info = CATEGORY_BY_ID[it.category];
+              const slot = slotOf(it);
               const isSel = selected === l.itemId;
               return (
-                <li key={l.itemId} className={`layer ${isSel ? 'is-selected' : ''}`}>
+                <li key={l.itemId} className={`layer ${isSel ? 'is-selected' : ''} ${l.hidden ? 'is-hidden' : ''}`} data-slot={slot.slot}>
                   <div className="layer-row" onClick={() => setSelected(isSel ? null : l.itemId)}>
                     <div className="checker layer-thumb"><img src={it.imageDataUrl} alt="" /></div>
                     <div className="layer-info">
                       <div className="layer-name">{itemTitle(it)}</div>
-                      <div className="muted small">{info.label} · {info.zone}</div>
+                      <div className="muted small">{kindLabel(it, CATEGORY_BY_ID[it.category].label)} · {slot.level ? LEVEL_LABEL[slot.level] : slot.zone}</div>
                     </div>
+                    <button
+                      className={`icon-btn icon-btn-sm ${l.hidden ? 'is-off' : ''}`}
+                      data-testid="layer-eye"
+                      aria-label={l.hidden ? 'Показать' : 'Скрыть'}
+                      aria-pressed={!!l.hidden}
+                      title={l.hidden ? 'Показать на манекене' : 'Скрыть на манекене (вещь остаётся в образе)'}
+                      onClick={(e) => { e.stopPropagation(); updateLayer(l.itemId, { hidden: !l.hidden }); }}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                        <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" />
+                        <circle cx="12" cy="12" r="2.8" />
+                        {l.hidden && <path d="M4 20L20 4" />}
+                      </svg>
+                    </button>
                     <button className="icon-btn icon-btn-sm" aria-label="Снять" title="Снять" onClick={(e) => { e.stopPropagation(); removeLayer(l.itemId); }}>
                       <svg width="14" height="14" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
                     </button>
@@ -190,9 +213,24 @@ export function BuilderScreen() {
           </>
         )}
 
+        <div className="perfume-day">
+          <div className="panel-head">
+            <h3 className="panel-sub">Аромат дня</h3>
+            <button className="link-btn small" onClick={() => setPickPerfume((v) => !v)}>{pickPerfume ? 'Готово' : draft.perfumeIds?.length ? 'Изменить' : 'Выбрать'}</button>
+          </div>
+          {pickPerfume ? (
+            <PerfumePicker value={draft.perfumeIds ?? []} onChange={setDraftPerfumes} onEmpty={() => navigate('perfumes')} />
+          ) : (
+            <PerfumeChips ids={draft.perfumeIds ?? []} empty="Не выбран — аромат не надевается на манекен, но попадёт в дневник." />
+          )}
+        </div>
+
         <div className="side-actions">
           <button className="btn btn-primary btn-block" disabled={!layers.length} onClick={() => setSaving(true)}>
             {editing ? 'Сохранить образ…' : 'Сохранить образ'}
+          </button>
+          <button className="btn btn-ghost btn-block" disabled={!layers.length && !draft.perfumeIds?.length} onClick={() => recordDiary({ source: 'builder' })} data-testid="record-diary">
+            Записать в дневник
           </button>
           <button className="btn btn-ghost btn-block" onClick={() => navigate('suggest')}>✦ Что надеть?</button>
         </div>

@@ -28,6 +28,8 @@ export interface Item {
   updatedAt?: string;
   /** версия картинки — меняется при замене фото */
   imageRev?: string;
+  /** подтип: футболка, свитер, рюкзак, часы… (см. catalog.ts) */
+  subtype?: string;
 }
 
 export interface Layer {
@@ -38,6 +40,8 @@ export interface Layer {
   y: number;
   scale: number;
   flip: boolean;
+  /** временно скрыт на манекене (чтобы заглянуть под куртку) */
+  hidden?: boolean;
 }
 
 export interface Outfit {
@@ -48,10 +52,48 @@ export interface Outfit {
   layers: Layer[];
 }
 
+export type SyncKind = 'item' | 'outfit' | 'perfume' | 'diary';
+
+export type PerfumeFamily = 'citrus' | 'woody' | 'floral' | 'oriental' | 'fresh' | 'gourmand' | 'other';
+
+export interface Perfume {
+  id: string;
+  name: string;
+  brand: string;
+  /** необязательное фото флакона (в памяти — object URL) */
+  imageDataUrl?: string;
+  imageRev?: string;
+  family: PerfumeFamily;
+  season: Season;
+  occasion?: Occasion;
+  tags: string[];
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type Mood = 'great' | 'good' | 'ok' | 'meh';
+export type Weather = 'sunny' | 'cloudy' | 'rain' | 'snow' | 'hot' | 'cold' | 'wind';
+
+/** Запись дневника: что было надето в этот день */
+export interface DiaryEntry {
+  id: string;
+  /** YYYY-MM-DD (локальная дата) */
+  date: string;
+  /** копия слоёв на момент записи — последующие правки образа не меняют историю */
+  layers: Layer[];
+  outfitId?: string;
+  perfumeIds: string[];
+  note?: string;
+  mood?: Mood;
+  weather?: Weather;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 /** Отметка об удалении — нужна, чтобы удаление дошло до других устройств */
 export interface Tombstone {
   key: string; // `${kind}:${id}`
-  kind: 'item' | 'outfit';
+  kind: SyncKind;
   id: string;
   updatedAt: string;
 }
@@ -59,6 +101,8 @@ export interface Tombstone {
 export interface Draft {
   layers: Layer[];
   editingId: string | null;
+  /** «аромат дня» в конструкторе */
+  perfumeIds?: string[];
 }
 
 export interface Prefs {
@@ -67,8 +111,10 @@ export interface Prefs {
 
 export interface BackupFile {
   app: 'wardrobe';
-  version: 1;
+  version: 1 | 2;
   exportedAt: string;
   items: Item[];
   outfits: Outfit[];
+  perfumes?: Perfume[];
+  diary?: DiaryEntry[];
 }

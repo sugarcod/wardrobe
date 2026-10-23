@@ -1,6 +1,9 @@
 import { CATEGORY_BY_ID, OCCASION_LABEL, SEASON_LABEL } from '../constants';
 import { colorLabel, swatchStyle } from '../lib/colors';
 import type { Item } from '../types';
+import { kindLabel } from '../catalog';
+import type { WearStat } from '../store';
+import { pluralRu, relativeDay } from '../lib/util';
 
 export function itemTags(item: Item): string[] {
   const t: string[] = [];
@@ -16,9 +19,10 @@ interface Props {
   compact?: boolean;
   active?: boolean;
   badge?: string;
+  stat?: WearStat;
 }
 
-export function ItemCard({ item, onClick, compact, active, badge }: Props) {
+export function ItemCard({ item, onClick, compact, active, badge, stat }: Props) {
   const tags = itemTags(item).slice(0, compact ? 0 : 3);
   return (
     <button type="button" className={`item-card ${compact ? 'item-card-compact' : ''} ${active ? 'is-active' : ''}`} onClick={onClick} title={item.name || CATEGORY_BY_ID[item.category].label}>
@@ -30,10 +34,15 @@ export function ItemCard({ item, onClick, compact, active, badge }: Props) {
       {!compact && (
         <div className="item-card-meta">
           <div className="item-card-row">
-            <span className="item-card-cat">{CATEGORY_BY_ID[item.category].label}</span>
+            <span className="item-card-cat">{kindLabel(item, CATEGORY_BY_ID[item.category].label)}</span>
             {item.color && <span className="swatch swatch-sm" style={swatchStyle(item.color)} />}
           </div>
           {item.name && <div className="item-card-name">{item.name}</div>}
+          {stat && (
+            <div className="wear-stat small">
+              Надевали {stat.count} {pluralRu(stat.count, 'раз', 'раза', 'раз')}, последний — {relativeDay(stat.last)}
+            </div>
+          )}
           <div className="tag-row">
             {tags.map((t) => (
               <span key={t} className="tag">{t}</span>

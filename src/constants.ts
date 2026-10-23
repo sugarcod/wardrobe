@@ -29,10 +29,10 @@ export const CATEGORIES: CategoryInfo[] = [
   { id: 'dress', label: 'Платье / комбинезон', plural: 'Платья', zone: 'Торс и ноги', stackable: false, order: 2, box: { l: 0.24, t: 0.165, w: 0.52, h: 0.55, px: 0.5, py: 0 } },
   { id: 'outerwear', label: 'Верхняя одежда', plural: 'Верхняя одежда', zone: 'Торс', stackable: false, order: 3, box: { l: 0.2, t: 0.16, w: 0.6, h: 0.42, px: 0.5, py: 0 } },
   { id: 'shoes', label: 'Обувь', plural: 'Обувь', zone: 'Стопы', stackable: false, order: 4, box: { l: 0.33, t: 0.9, w: 0.34, h: 0.095, px: 0.5, py: 1 } },
-  { id: 'bag', label: 'Сумка', plural: 'Сумки', zone: 'Рука', stackable: false, order: 5, box: { l: 0.64, t: 0.5, w: 0.3, h: 0.2, px: 0.5, py: 0.5 } },
+  { id: 'bag', label: 'Сумка / рюкзак', plural: 'Сумки', zone: 'Рука', stackable: false, order: 5, box: { l: 0.64, t: 0.5, w: 0.3, h: 0.2, px: 0.5, py: 0.5 } },
   { id: 'hat', label: 'Головной убор', plural: 'Головные уборы', zone: 'Голова', stackable: false, order: 6, box: { l: 0.34, t: 0.0, w: 0.32, h: 0.11, px: 0.5, py: 1 } },
-  { id: 'jewelry', label: 'Украшение', plural: 'Украшения', zone: 'Шея', stackable: true, order: 7, box: { l: 0.4, t: 0.13, w: 0.2, h: 0.1, px: 0.5, py: 0 } },
-  { id: 'other', label: 'Другое', plural: 'Другое', zone: 'Торс', stackable: true, order: 8, box: { l: 0.33, t: 0.3, w: 0.34, h: 0.18, px: 0.5, py: 0.5 } },
+  { id: 'jewelry', label: 'Украшение / часы', plural: 'Украшения', zone: 'Шея', stackable: true, order: 7, box: { l: 0.4, t: 0.13, w: 0.2, h: 0.1, px: 0.5, py: 0 } },
+  { id: 'other', label: 'Аксессуар', plural: 'Аксессуары', zone: 'Торс', stackable: true, order: 8, box: { l: 0.33, t: 0.3, w: 0.34, h: 0.18, px: 0.5, py: 0.5 } },
 ];
 
 export const CATEGORY_BY_ID = Object.fromEntries(CATEGORIES.map((c) => [c.id, c])) as Record<Category, CategoryInfo>;

@@ -1,14 +1,19 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
-import type { Item, Outfit, Tombstone } from '../types';
+import type { DiaryEntry, Item, Outfit, Perfume, Tombstone } from '../types';
+import { kindFromName } from './suggest';
 
 /** Метаданные вещи без картинки — сама картинка лежит отдельно как Blob */
 export type ItemMeta = Omit<Item, 'imageDataUrl'>;
+export type PerfumeMeta = Omit<Perfume, 'imageDataUrl'>;
 
 interface WardrobeDB extends DBSchema {
   items: { key: string; value: ItemMeta };
   images: { key: string; value: Blob };
   outfits: { key: string; value: Outfit };
   tombstones: { key: string; value: Tombstone };
+  perfumes: { key: string; value: PerfumeMeta };
+  perfumeImages: { key: string; value: Blob };
+  diary: { key: string; value: DiaryEntry };
 }
 
 export class StorageFullError extends Error {
@@ -33,18 +38,45 @@ async function settle(ops: Promise<unknown>[], done: Promise<void>) {
 let dbp: Promise<IDBPDatabase<WardrobeDB>> | null = null;
 function db() {
   if (!dbp) {
-    dbp = openDB<WardrobeDB>('wardrobe', 2, {
-      upgrade(d, oldVersion) {
+    dbp = openDB<WardrobeDB>('wardrobe', 3, {
+      upgrade(d, oldVersion, _newVersion, tx) {
         if (oldVersion < 1) {
           d.createObjectStore('items', { keyPath: 'id' });
           d.createObjectStore('images');
           d.createObjectStore('outfits', { keyPath: 'id' });
         }
         if (oldVersion < 2) d.createObjectStore('tombstones', { keyPath: 'key' });
+        if (oldVersion < 3) {
+          d.createObjectStore('perfumes', { keyPath: 'id' });
+          d.createObjectStore('perfumeImages');
+          d.createObjectStore('diary', { keyPath: 'id' });
+          // старые вещи: подтип по названию (верх → базовый слой, если не понятно)
+          if (oldVersion >= 1) void migrateSubtypes(tx.objectStore('items'));
+        }
       },
     });
   }
   return dbp;
+}
+
+type ItemsStore = { openCursor(): Promise<{ value: ItemMeta; update(v: ItemMeta): Promise<unknown>; continue(): Promise<unknown> } | null> };
+async function migrateSubtypes(store: unknown) {
+  try {
+    let cur = await (store as ItemsStore).openCursor();
+    while (cur) {
+      const m = cur.value;
+      if (!m.subtype) {
+        const k = kindFromName(m.name || '');
+        const sub = k && k.category === m.category ? k.subtype : undefined;
+        const fallback = m.category === 'top' ? 'tshirt' : m.category === 'outerwear' ? 'jacket' : undefined;
+        const subtype = sub ?? fallback;
+        if (subtype) await cur.update({ ...m, subtype });
+      }
+      cur = (await cur.continue()) as typeof cur;
+    }
+  } catch {
+    /* не критично: без подтипа вещь всё равно получает зону по категории */
+  }
 }
 
 /** Обёртка: ошибки квоты превращаются в StorageFullError */
@@ -80,13 +112,26 @@ function stripImage(item: Item): ItemMeta {
 export interface LoadedData {
   items: Item[];
   outfits: Outfit[];
+  perfumes: Perfume[];
+  diary: DiaryEntry[];
+}
+
+export interface PerfumeRecord {
+  meta: PerfumeMeta;
+  blob?: Blob;
+}
+
+export function stripPerfume(p: Perfume): PerfumeMeta {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { imageDataUrl: _omit, ...meta } = p;
+  return meta;
 }
 
 export const idb = {
   /** Загружает всё; картинки превращаются в object URL */
   async loadAll(): Promise<LoadedData> {
     const d = await db();
-    const tx = d.transaction(['items', 'images', 'outfits']);
+    const tx = d.transaction(['items', 'images', 'outfits', 'perfumes', 'perfumeImages', 'diary']);
     const metas = await tx.objectStore('items').getAll();
     const outfits = await tx.objectStore('outfits').getAll();
     const images = tx.objectStore('images');
@@ -96,10 +141,18 @@ export const idb = {
       if (!blob) continue;
       items.push({ ...m, imageDataUrl: URL.createObjectURL(blob) });
     }
+    const pmetas = await tx.objectStore('perfumes').getAll();
+    const perfumes: Perfume[] = [];
+    for (const m of pmetas) {
+      const blob = m.imageRev ? await tx.objectStore('perfumeImages').get(m.id) : undefined;
+      perfumes.push(blob ? { ...m, imageDataUrl: URL.createObjectURL(blob) } : { ...m });
+    }
+    const diary = await tx.objectStore('diary').getAll();
     await tx.done;
     items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     outfits.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    return { items, outfits };
+    perfumes.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return { items, outfits, perfumes, diary };
   },
 
   /** Сохраняет вещи; imageBlobs — картинки для вещей с новым изображением */
@@ -143,6 +196,42 @@ export const idb = {
     await settle(ops, tx.done);
   },
 
+  /** blob: Blob — новая картинка, null — удалить картинку, undefined — не трогать */
+  async putPerfume(p: Perfume, blob: Blob | null | undefined) {
+    await guard(async () => {
+      const d = await db();
+      const tx = d.transaction(['perfumes', 'perfumeImages', 'tombstones'], 'readwrite');
+      const ops: Promise<unknown>[] = [tx.objectStore('perfumes').put(stripPerfume(p)), tx.objectStore('tombstones').delete(`perfume:${p.id}`)];
+      if (blob) ops.push(tx.objectStore('perfumeImages').put(blob, p.id));
+      else if (blob === null) ops.push(tx.objectStore('perfumeImages').delete(p.id));
+      await settle(ops, tx.done);
+    });
+  },
+
+  async deletePerfume(id: string, tomb?: Tombstone) {
+    const d = await db();
+    const tx = d.transaction(['perfumes', 'perfumeImages', 'tombstones'], 'readwrite');
+    const ops: Promise<unknown>[] = [tx.objectStore('perfumes').delete(id), tx.objectStore('perfumeImages').delete(id)];
+    if (tomb) ops.push(tx.objectStore('tombstones').put(tomb));
+    await settle(ops, tx.done);
+  },
+
+  async putDiary(e: DiaryEntry) {
+    await guard(async () => {
+      const d = await db();
+      const tx = d.transaction(['diary', 'tombstones'], 'readwrite');
+      await settle([tx.objectStore('diary').put(e), tx.objectStore('tombstones').delete(`diary:${e.id}`)], tx.done);
+    });
+  },
+
+  async deleteDiary(id: string, tomb?: Tombstone) {
+    const d = await db();
+    const tx = d.transaction(['diary', 'tombstones'], 'readwrite');
+    const ops: Promise<unknown>[] = [tx.objectStore('diary').delete(id)];
+    if (tomb) ops.push(tx.objectStore('tombstones').put(tomb));
+    await settle(ops, tx.done);
+  },
+
   async getTombstones(): Promise<Tombstone[]> {
     return (await db()).getAll('tombstones');
   },
@@ -152,14 +241,20 @@ export const idb = {
   },
 
   /** Полная замена данных (импорт «заменить всё», очистка) */
-  async replaceAll(items: { meta: ItemMeta; blob: Blob }[], outfits: Outfit[], clear: boolean) {
+  async replaceAll(items: { meta: ItemMeta; blob: Blob }[], outfits: Outfit[], clear: boolean, perfumes: PerfumeRecord[] = [], diary: DiaryEntry[] = []) {
     await guard(async () => {
       const d = await db();
-      const tx = d.transaction(['items', 'images', 'outfits', 'tombstones'], 'readwrite');
+      const tx = d.transaction(['items', 'images', 'outfits', 'tombstones', 'perfumes', 'perfumeImages', 'diary'], 'readwrite');
       const ops: Promise<unknown>[] = [];
       if (clear) {
         ops.push(tx.objectStore('items').clear(), tx.objectStore('images').clear(), tx.objectStore('outfits').clear(), tx.objectStore('tombstones').clear());
+        ops.push(tx.objectStore('perfumes').clear(), tx.objectStore('perfumeImages').clear(), tx.objectStore('diary').clear());
       }
+      for (const { meta, blob } of perfumes) {
+        ops.push(tx.objectStore('perfumes').put(meta));
+        if (blob) ops.push(tx.objectStore('perfumeImages').put(blob, meta.id));
+      }
+      for (const e of diary) ops.push(tx.objectStore('diary').put(e));
       for (const { meta, blob } of items) {
         ops.push(tx.objectStore('items').put(meta), tx.objectStore('images').put(blob, meta.id));
       }
@@ -178,6 +273,21 @@ export async function itemsFromDataUrls(items: Item[]) {
     } catch {
       /* битая картинка — пропускаем */
     }
+  }
+  return out;
+}
+
+/** Парфюмы с data URL (из JSON) → записи для IDB */
+export async function perfumesFromDataUrls(list: Perfume[]): Promise<PerfumeRecord[]> {
+  const out: PerfumeRecord[] = [];
+  for (const p of list) {
+    let blob: Blob | undefined;
+    if (p.imageDataUrl) {
+      try { blob = await dataUrlToBlob(p.imageDataUrl); } catch { blob = undefined; }
+    }
+    const meta = stripPerfume(p);
+    if (!blob) delete meta.imageRev;
+    out.push({ meta, blob });
   }
   return out;
 }

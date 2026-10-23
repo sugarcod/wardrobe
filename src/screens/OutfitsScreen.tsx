@@ -8,7 +8,7 @@ import type { Outfit } from '../types';
 
 export function OutfitsScreen() {
   const { outfits, itemsById, loadOutfit, deleteOutfit, prefs } = useStore();
-  const { navigate } = useApp();
+  const { navigate, recordDiary } = useApp();
   const { confirm, toast } = useUI();
 
   const open = (o: Outfit) => {
@@ -57,6 +57,7 @@ export function OutfitsScreen() {
                     </p>
                   </div>
                   <div className="outfit-actions">
+                    <button className="btn btn-sm btn-ghost" onClick={() => recordDiary({ layers: o.layers, outfitId: o.id, source: 'outfit' })} title="Записать в дневник на сегодня">Носил(а) сегодня</button>
                     <button className="btn btn-sm btn-ghost" onClick={() => open(o)}>Открыть</button>
                     <button className="icon-btn icon-btn-sm" aria-label="Удалить образ" title="Удалить" onClick={() => remove(o)}>
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></svg>

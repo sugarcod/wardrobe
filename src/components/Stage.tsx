@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { CATEGORY_BY_ID } from '../constants';
+import { slotOf } from '../catalog';
 import type { Item, Layer } from '../types';
 import { Mannequin } from './Mannequin';
 import { ensureAlpha, getAlpha } from '../lib/hit';
@@ -32,7 +33,7 @@ export function Stage({ layers, itemsById, dark, interactive, selectedId, onSele
     });
   }, [layers, itemsById, interactive]);
 
-  const visible = layers.filter((l) => itemsById.has(l.itemId));
+  const visible = layers.filter((l) => itemsById.has(l.itemId) && !l.hidden);
 
   const hitTest = (clientX: number, clientY: number): Layer | null => {
     const el = ref.current;
@@ -43,7 +44,7 @@ export function Stage({ layers, itemsById, dark, interactive, selectedId, onSele
     for (let i = visible.length - 1; i >= 0; i--) {
       const l = visible[i];
       const it = itemsById.get(l.itemId)!;
-      const b = CATEGORY_BY_ID[it.category].box;
+      const b = slotOf(it).box;
       const bw = b.w * W, bh = b.h * H;
       const cx = (b.l + l.x) * W + bw / 2, cy = (b.t + l.y) * H + bh / 2;
       let dx = (px - cx) / l.scale;
@@ -108,13 +109,14 @@ export function Stage({ layers, itemsById, dark, interactive, selectedId, onSele
       <Mannequin dark={dark} />
       {visible.map((l) => {
         const it = itemsById.get(l.itemId)!;
-        const info = CATEGORY_BY_ID[it.category];
+        const info = slotOf(it);
         const b = info.box;
         return (
           <div
             key={l.itemId}
             className={`stage-layer ${selectedId === l.itemId ? 'is-selected' : ''}`}
             data-item={l.itemId}
+            data-slot={info.slot}
             style={{
               left: `${(b.l + l.x) * 100}%`,
               top: `${(b.t + l.y) * 100}%`,
@@ -126,7 +128,7 @@ export function Stage({ layers, itemsById, dark, interactive, selectedId, onSele
           >
             <img
               src={it.imageDataUrl}
-              alt={it.name || info.label}
+              alt={it.name || CATEGORY_BY_ID[it.category].label}
               draggable={false}
               style={{ objectPosition: `${b.px * 100}% ${b.py * 100}%` }}
             />

@@ -1,12 +1,20 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { Draft, Item, Layer, Outfit, Prefs, Tombstone } from './types';
+import type { DiaryEntry, Draft, Item, Layer, Outfit, Perfume, Prefs, SyncKind, Tombstone } from './types';
 import { local, migrateFromLocalStorage } from './lib/storage';
-import { StorageFullError, blobToDataUrl, dataUrlToBlob, idb, itemsFromDataUrls, requestPersistence } from './lib/db';
+import { StorageFullError, blobToDataUrl, dataUrlToBlob, idb, itemsFromDataUrls, perfumesFromDataUrls, requestPersistence } from './lib/db';
 import { cleanLayers, sortLayers, wear } from './lib/outfit';
 import { nextStamp } from './lib/syncMerge';
 import { uid, pluralRu } from './lib/util';
 import { useUI } from './ui';
-import type { LocalAdapter, RemoteChanges, SyncHandle } from './lib/cloud';
+import type { LocalAdapter, RemoteChanges, SyncHandle, SyncRecord } from './lib/cloud';
+
+export interface WearStat {
+  count: number;
+  /** YYYY-MM-DD */
+  last: string;
+}
+
+export type DiaryInput = Omit<DiaryEntry, 'id' | 'createdAt' | 'updatedAt'> & { id?: string };
 
 interface StoreCtx {
   ready: boolean;
@@ -30,8 +38,19 @@ interface StoreCtx {
   loadOutfit: (o: Outfit) => void;
   saveOutfit: (name: string, asNew: boolean) => Promise<Outfit | null>;
   deleteOutfit: (id: string) => Promise<void>;
+  perfumes: Perfume[];
+  perfumesById: Map<string, Perfume>;
+  /** imageDataUrl: data: — новое фото, undefined — без фото */
+  savePerfume: (p: Perfume) => Promise<Perfume | null>;
+  deletePerfume: (id: string) => Promise<void>;
+  diary: DiaryEntry[];
+  saveDiary: (e: DiaryInput) => Promise<DiaryEntry | null>;
+  deleteDiary: (id: string) => Promise<void>;
+  /** сколько раз и когда последний раз надевали (по дневнику) — для вещей и парфюмов */
+  wearStats: Map<string, WearStat>;
+  setDraftPerfumes: (ids: string[]) => void;
   /** импорт из резервной копии (картинки — data URL) */
-  importData: (items: Item[], outfits: Outfit[], replace: boolean) => Promise<boolean>;
+  importData: (items: Item[], outfits: Outfit[], replace: boolean, perfumes?: Perfume[], diary?: DiaryEntry[]) => Promise<boolean>;
   /** удалить всё (если включена синхронизация — и в облаке) */
   wipeAll: () => Promise<boolean>;
   /** удалить только локальную копию, без синхронизации (при выходе из аккаунта) */
@@ -46,6 +65,9 @@ interface StoreCtx {
 const Ctx = createContext<StoreCtx | null>(null);
 
 const byCreatedDesc = <T extends { createdAt: string }>(a: T, b: T) => b.createdAt.localeCompare(a.createdAt);
+const byCreatedAsc = <T extends { createdAt: string }>(a: T, b: T) => a.createdAt.localeCompare(b.createdAt);
+/** дневник: новые дни сверху, внутри дня — по времени записи */
+const byDiary = (a: DiaryEntry, b: DiaryEntry) => b.date.localeCompare(a.date) || a.createdAt.localeCompare(b.createdAt);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const { toast } = useUI();
@@ -54,6 +76,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [persisted, setPersisted] = useState<boolean | null>(null);
   const [items, setItemsState] = useState<Item[]>([]);
   const [outfits, setOutfitsState] = useState<Outfit[]>([]);
+  const [perfumes, setPerfumesState] = useState<Perfume[]>([]);
+  const [diary, setDiaryState] = useState<DiaryEntry[]>([]);
   const [draft, setDraft] = useState<Draft>(() => local.loadDraft());
   const [prefs, setPrefsState] = useState<Prefs>(() => local.loadPrefs());
   const [syncAttached, setSyncAttached] = useState(false);
@@ -61,6 +85,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // refs — источник истины для асинхронной синхронизации (состояние React обновляется следом)
   const itemsRef = useRef<Item[]>([]);
   const outfitsRef = useRef<Outfit[]>([]);
+  const perfumesRef = useRef<Perfume[]>([]);
+  const diaryRef = useRef<DiaryEntry[]>([]);
   const syncRef = useRef<SyncHandle | null>(null);
 
   const setItems = useCallback((fn: (cur: Item[]) => Item[]) => {
@@ -71,6 +97,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     outfitsRef.current = fn(outfitsRef.current);
     setOutfitsState(outfitsRef.current);
   }, []);
+
+  const setPerfumes = useCallback((fn: (cur: Perfume[]) => Perfume[]) => {
+    perfumesRef.current = fn(perfumesRef.current);
+    setPerfumesState(perfumesRef.current);
+  }, []);
+  const setDiary = useCallback((fn: (cur: DiaryEntry[]) => DiaryEntry[]) => {
+    diaryRef.current = fn(diaryRef.current).sort(byDiary);
+    setDiaryState(diaryRef.current);
+  }, []);
+
+  const perfumesById = useMemo(() => new Map(perfumes.map((p) => [p.id, p])), [perfumes]);
+  const wearStats = useMemo(() => {
+    const m = new Map<string, WearStat>();
+    const bump = (id: string, date: string) => {
+      const s = m.get(id);
+      if (!s) m.set(id, { count: 1, last: date });
+      else { s.count++; if (date > s.last) s.last = date; }
+    };
+    for (const e of diary) {
+      new Set(e.layers.map((l) => l.itemId)).forEach((id) => bump(id, e.date));
+      new Set(e.perfumeIds).forEach((id) => bump(id, e.date));
+    }
+    return m;
+  }, [diary]);
 
   const itemsById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
 
@@ -87,9 +137,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const data = await idb.loadAll();
     urls.current.forEach((u) => revoke(u));
     track(data.items);
+    data.perfumes.forEach((p) => p.imageDataUrl && urls.current.add(p.imageDataUrl));
     setItems(() => data.items);
     setOutfits(() => data.outfits);
-  }, [setItems, setOutfits]);
+    setPerfumes(() => data.perfumes);
+    setDiary(() => data.diary);
+  }, [setItems, setOutfits, setPerfumes, setDiary]);
 
   useEffect(() => {
     let alive = true;
@@ -131,11 +184,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /** Применение изменений, пришедших из облака (без обратной отправки) */
   const applyRemote = useCallback(
     async (c: RemoteChanges) => {
-      if (c.items.length) {
+      const of = (k: SyncKind) => c.upserts.filter((u) => u.kind === k);
+      const del = (k: SyncKind) => c.deletes.filter((d) => d.kind === k);
+
+      const itemUps = of('item');
+      if (itemUps.length) {
         const blobs = new Map<string, Blob>();
-        for (const { item, imageDataUrl } of c.items) if (imageDataUrl) blobs.set(item.id, await dataUrlToBlob(imageDataUrl));
-        await idb.putItems(c.items.map((x) => x.item), blobs);
-        const nextItems = new Map(c.items.map(({ item }) => {
+        for (const { rec, imageDataUrl } of itemUps) if (imageDataUrl) blobs.set(rec.id, await dataUrlToBlob(imageDataUrl));
+        const list = itemUps.map((u) => ({ ...(u.rec as Item), imageDataUrl: u.rec.imageDataUrl ?? '' }));
+        await idb.putItems(list, blobs);
+        const nextItems = new Map(list.map((item) => {
           const b = blobs.get(item.id);
           return [item.id, b ? { ...item, imageDataUrl: URL.createObjectURL(b) } : item] as const;
         }));
@@ -151,7 +209,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           return [...out, ...[...nextItems.values()].filter((i) => i.imageDataUrl)].sort(byCreatedDesc);
         });
       }
-      for (const d of c.deletedItems) {
+      for (const d of del('item')) {
         await idb.deleteItem(d.id, { key: `item:${d.id}`, kind: 'item', id: d.id, updatedAt: d.updatedAt });
         setItems((cur) => {
           const it = cur.find((i) => i.id === d.id);
@@ -160,33 +218,91 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         });
         setDraft((dr) => ({ ...dr, layers: dr.layers.filter((l) => l.itemId !== d.id) }));
       }
-      for (const o of c.outfits) {
+      for (const { rec } of of('outfit')) {
+        const o = rec as unknown as Outfit;
         await idb.putOutfit(o);
         setOutfits((cur) => [...cur.filter((x) => x.id !== o.id), o].sort(byCreatedDesc));
       }
-      for (const d of c.deletedOutfits) {
+      for (const d of del('outfit')) {
         await idb.deleteOutfit(d.id, { key: `outfit:${d.id}`, kind: 'outfit', id: d.id, updatedAt: d.updatedAt });
         setOutfits((cur) => cur.filter((o) => o.id !== d.id));
         setDraft((dr) => (dr.editingId === d.id ? { ...dr, editingId: null } : dr));
       }
+      for (const u of of('perfume')) {
+        const prev = perfumesRef.current.find((p) => p.id === u.rec.id);
+        const blob = u.imageDataUrl ? await dataUrlToBlob(u.imageDataUrl) : u.removeImage ? null : undefined;
+        const next = { ...(u.rec as unknown as Perfume) };
+        if (blob) {
+          next.imageDataUrl = URL.createObjectURL(blob);
+          urls.current.add(next.imageDataUrl);
+        } else if (blob === null) {
+          delete next.imageDataUrl;
+        } else {
+          next.imageDataUrl = prev?.imageDataUrl;
+        }
+        await idb.putPerfume(next, blob);
+        if (prev?.imageDataUrl && prev.imageDataUrl !== next.imageDataUrl) revoke(prev.imageDataUrl);
+        setPerfumes((cur) => [...cur.filter((p) => p.id !== next.id), next].sort(byCreatedAsc));
+      }
+      for (const d of del('perfume')) {
+        await idb.deletePerfume(d.id, { key: `perfume:${d.id}`, kind: 'perfume', id: d.id, updatedAt: d.updatedAt });
+        setPerfumes((cur) => {
+          const p = cur.find((x) => x.id === d.id);
+          if (p?.imageDataUrl) revoke(p.imageDataUrl);
+          return cur.filter((x) => x.id !== d.id);
+        });
+        setDraft((dr) => ({ ...dr, perfumeIds: (dr.perfumeIds ?? []).filter((x) => x !== d.id) }));
+      }
+      for (const { rec } of of('diary')) {
+        const e = rec as unknown as DiaryEntry;
+        await idb.putDiary(e);
+        setDiary((cur) => [...cur.filter((x) => x.id !== e.id), e]);
+      }
+      for (const d of del('diary')) {
+        await idb.deleteDiary(d.id, { key: `diary:${d.id}`, kind: 'diary', id: d.id, updatedAt: d.updatedAt });
+        setDiary((cur) => cur.filter((x) => x.id !== d.id));
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [setItems, setOutfits],
+    [setItems, setOutfits, setPerfumes, setDiary],
   );
 
   const syncAdapter = useMemo<LocalAdapter>(
     () => ({
-      getLocal: async () => ({ items: itemsRef.current, outfits: outfitsRef.current, tombstones: await idb.getTombstones() }),
-      imageToDataUrl: async (item) => (item.imageDataUrl.startsWith('data:') ? item.imageDataUrl : blobToDataUrl(await dataUrlToBlob(item.imageDataUrl))),
+      getLocal: async () => ({
+        records: {
+          item: itemsRef.current,
+          outfit: outfitsRef.current,
+          perfume: perfumesRef.current,
+          diary: diaryRef.current,
+        } as unknown as Record<SyncKind, SyncRecord[]>,
+        tombstones: await idb.getTombstones(),
+      }),
+      imageToDataUrl: async (_kind, rec) => {
+        const url = rec.imageDataUrl ?? '';
+        return url.startsWith('data:') ? url : blobToDataUrl(await dataUrlToBlob(url));
+      },
       applyRemote,
     }),
     [applyRemote],
   );
 
+  const push = (kind: SyncKind, rec: unknown, imageChanged = false) => syncRef.current?.push(kind, rec as SyncRecord, imageChanged);
+
   const wipeLocal = async () => {
     await idb.replaceAll([], [], true);
     await reload();
     setDraft({ layers: [], editingId: null });
+  };
+
+  const deleteRecord = async (kind: 'perfume' | 'diary', t: Tombstone) => {
+    if (kind === 'perfume') await idb.deletePerfume(t.id, t);
+    else await idb.deleteDiary(t.id, t);
+  };
+  const deleteAny = async (t: Tombstone) => {
+    if (t.kind === 'item') await idb.deleteItem(t.id, t);
+    else if (t.kind === 'outfit') await idb.deleteOutfit(t.id, t);
+    else await deleteRecord(t.kind, t);
   };
 
   const value: StoreCtx = {
@@ -195,7 +311,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     items,
     itemsById,
     outfits,
-    draft: { ...draft, layers: cleanLayers(draft.layers, itemsById) },
+    perfumes,
+    perfumesById,
+    diary,
+    wearStats,
+    draft: { ...draft, layers: cleanLayers(draft.layers, itemsById), perfumeIds: (draft.perfumeIds ?? []).filter((id) => perfumesById.has(id)) },
     prefs,
     syncAdapter,
     syncAttached,
@@ -214,7 +334,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const live = stamped.map((it) => ({ ...it, imageDataUrl: URL.createObjectURL(blobs.get(it.id)!) }));
         track(live);
         setItems((cur) => [...live, ...cur]);
-        live.forEach((it) => syncRef.current?.pushItem(it, true));
+        live.forEach((it) => push('item', it, true));
         return true;
       } catch (e) {
         return fail(e);
@@ -241,7 +361,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             return next;
           }),
         );
-        syncRef.current?.pushItem(next, imageChanged);
+        push('item', next, imageChanged);
         return true;
       } catch (e) {
         return fail(e);
@@ -270,8 +390,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     updateLayer: (itemId, patch) =>
       setDraft((d) => ({ ...d, layers: d.layers.map((l) => (l.itemId === itemId ? { ...l, ...patch } : l)) })),
     removeLayer: (itemId) => setDraft((d) => ({ ...d, layers: d.layers.filter((l) => l.itemId !== itemId) })),
-    clearDraft: (keepEditing = true) => setDraft((d) => ({ layers: [], editingId: keepEditing ? d.editingId : null })),
-    loadOutfit: (o) => setDraft({ layers: sortLayers(cleanLayers(o.layers, itemsById), itemsById), editingId: o.id }),
+    clearDraft: (keepEditing = true) => setDraft((d) => ({ layers: [], editingId: keepEditing ? d.editingId : null, perfumeIds: d.perfumeIds })),
+    setDraftPerfumes: (ids) => setDraft((d) => ({ ...d, perfumeIds: ids })),
+    loadOutfit: (o) => setDraft((d) => ({ layers: sortLayers(cleanLayers(o.layers, itemsById), itemsById), editingId: o.id, perfumeIds: d.perfumeIds })),
 
     saveOutfit: async (name, asNew) => {
       const layers = cleanLayers(draft.layers, itemsById);
@@ -286,7 +407,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       setOutfits((cur) => (existing ? cur.map((o) => (o.id === saved.id ? saved : o)) : [saved, ...cur]));
       setDraft((d) => ({ ...d, editingId: saved.id }));
-      syncRef.current?.pushOutfit(saved);
+      push('outfit', saved);
       return saved;
     },
 
@@ -303,23 +424,111 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     },
 
-    importData: async (newItems, newOutfits, replace) => {
+    savePerfume: async (p) => {
+      const prev = perfumesRef.current.find((x) => x.id === p.id);
+      const now = nextStamp(prev?.updatedAt ?? prev?.createdAt);
+      let next: Perfume = { ...p, createdAt: prev?.createdAt ?? p.createdAt ?? now, updatedAt: now };
+      let blob: Blob | null | undefined;
+      let imageChanged = false;
+      try {
+        if (p.imageDataUrl?.startsWith('data:')) {
+          blob = await dataUrlToBlob(p.imageDataUrl);
+          next = { ...next, imageDataUrl: URL.createObjectURL(blob), imageRev: uid() };
+          urls.current.add(next.imageDataUrl!);
+          imageChanged = true;
+        } else if (!p.imageDataUrl && prev?.imageDataUrl) {
+          blob = null;
+          delete next.imageRev;
+          imageChanged = true;
+        }
+        await idb.putPerfume(next, blob);
+      } catch (e) {
+        fail(e);
+        return null;
+      }
+      if (prev?.imageDataUrl && prev.imageDataUrl !== next.imageDataUrl) revoke(prev.imageDataUrl);
+      setPerfumes((cur) => (prev ? cur.map((x) => (x.id === next.id ? next : x)) : [...cur, next]));
+      push('perfume', next, imageChanged || !prev);
+      return next;
+    },
+
+    deletePerfume: async (id) => {
+      try {
+        const prev = perfumesRef.current.find((x) => x.id === id);
+        const t = tomb('perfume', id, prev?.updatedAt ?? prev?.createdAt);
+        await idb.deletePerfume(id, t);
+        if (prev?.imageDataUrl) revoke(prev.imageDataUrl);
+        setPerfumes((cur) => cur.filter((x) => x.id !== id));
+        setDraft((d) => ({ ...d, perfumeIds: (d.perfumeIds ?? []).filter((x) => x !== id) }));
+        syncRef.current?.pushDelete('perfume', id, t.updatedAt);
+      } catch (e) {
+        fail(e);
+      }
+    },
+
+    saveDiary: async (input) => {
+      const prev = input.id ? diaryRef.current.find((x) => x.id === input.id) : undefined;
+      const now = nextStamp(prev?.updatedAt ?? prev?.createdAt);
+      const entry: DiaryEntry = {
+        ...input,
+        id: prev?.id ?? uid(),
+        layers: input.layers.map((l) => ({ ...l })),
+        perfumeIds: [...new Set(input.perfumeIds)],
+        createdAt: prev?.createdAt ?? now,
+        updatedAt: now,
+      };
+      try {
+        await idb.putDiary(entry);
+      } catch (e) {
+        fail(e);
+        return null;
+      }
+      setDiary((cur) => [...cur.filter((x) => x.id !== entry.id), entry]);
+      push('diary', entry);
+      return entry;
+    },
+
+    deleteDiary: async (id) => {
+      try {
+        const prev = diaryRef.current.find((x) => x.id === id);
+        const t = tomb('diary', id, prev?.updatedAt ?? prev?.createdAt);
+        await idb.deleteDiary(id, t);
+        setDiary((cur) => cur.filter((x) => x.id !== id));
+        syncRef.current?.pushDelete('diary', id, t.updatedAt);
+      } catch (e) {
+        fail(e);
+      }
+    },
+
+    importData: async (newItems, newOutfits, replace, newPerfumes = [], newDiary = []) => {
       try {
         const now = Date.now();
         const stampedItems = newItems.map((it, i) => ({ ...it, updatedAt: new Date(now + i).toISOString(), imageRev: uid() }));
         const stampedOutfits = newOutfits.map((o, i) => ({ ...o, updatedAt: new Date(now + i).toISOString() }));
         const removedItems = replace ? itemsRef.current.filter((i) => !newItems.some((n) => n.id === i.id)) : [];
         const removedOutfits = replace ? outfitsRef.current.filter((o) => !newOutfits.some((n) => n.id === o.id)) : [];
+        const stampedPerfumes = newPerfumes.map((p, i) => ({ ...p, updatedAt: new Date(now + i).toISOString(), imageRev: p.imageDataUrl ? uid() : undefined }));
+        const stampedDiary = newDiary.map((e, i) => ({ ...e, updatedAt: new Date(now + i).toISOString() }));
+        const removedPerfumes = replace ? perfumesRef.current.filter((p) => !newPerfumes.some((n) => n.id === p.id)) : [];
+        const removedDiary = replace ? diaryRef.current.filter((e) => !newDiary.some((n) => n.id === e.id)) : [];
         const records = await itemsFromDataUrls(stampedItems);
-        await idb.replaceAll(records, stampedOutfits, replace);
-        const tombs = [...removedItems.map((i) => tomb('item', i.id, i.updatedAt)), ...removedOutfits.map((o) => tomb('outfit', o.id, o.updatedAt))];
-        for (const t of tombs) await (t.kind === 'item' ? idb.deleteItem(t.id, t) : idb.deleteOutfit(t.id, t));
+        const precords = await perfumesFromDataUrls(stampedPerfumes);
+        await idb.replaceAll(records, stampedOutfits, replace, precords, stampedDiary);
+        const tombs = [
+          ...removedItems.map((i) => tomb('item', i.id, i.updatedAt)),
+          ...removedOutfits.map((o) => tomb('outfit', o.id, o.updatedAt)),
+          ...removedPerfumes.map((p) => tomb('perfume', p.id, p.updatedAt)),
+          ...removedDiary.map((e) => tomb('diary', e.id, e.updatedAt)),
+        ];
+        for (const t of tombs) await deleteAny(t);
         await reload();
         if (replace) setDraft({ layers: [], editingId: null });
         const s = syncRef.current;
         if (s) {
-          itemsRef.current.filter((i) => stampedItems.some((n) => n.id === i.id)).forEach((i) => s.pushItem(i, true));
-          stampedOutfits.forEach((o) => s.pushOutfit(o));
+          itemsRef.current.filter((i) => stampedItems.some((n) => n.id === i.id)).forEach((i) => s.push('item', i as unknown as SyncRecord, true));
+          stampedOutfits.forEach((o) => s.push('outfit', o as unknown as SyncRecord));
+          perfumesRef.current.filter((p) => stampedPerfumes.some((n) => n.id === p.id)).forEach((p) => s.push('perfume', p as unknown as SyncRecord, true));
+          stampedDiary.forEach((e) => s.push('diary', e as unknown as SyncRecord));
           tombs.forEach((t) => s.pushDelete(t.kind, t.id, t.updatedAt));
         }
         return true;
@@ -331,9 +540,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     wipeAll: async () => {
       try {
         const s = syncRef.current;
-        const tombs = s ? [...itemsRef.current.map((i) => tomb('item', i.id, i.updatedAt)), ...outfitsRef.current.map((o) => tomb('outfit', o.id, o.updatedAt))] : [];
+        const tombs = s
+          ? [
+              ...itemsRef.current.map((i) => tomb('item', i.id, i.updatedAt)),
+              ...outfitsRef.current.map((o) => tomb('outfit', o.id, o.updatedAt)),
+              ...perfumesRef.current.map((p) => tomb('perfume', p.id, p.updatedAt)),
+              ...diaryRef.current.map((e) => tomb('diary', e.id, e.updatedAt)),
+            ]
+          : [];
         await idb.replaceAll([], [], true);
-        for (const t of tombs) await (t.kind === 'item' ? idb.deleteItem(t.id, t) : idb.deleteOutfit(t.id, t));
+        for (const t of tombs) await deleteAny(t);
         await reload();
         setDraft({ layers: [], editingId: null });
         tombs.forEach((t) => s?.pushDelete(t.kind, t.id, t.updatedAt));

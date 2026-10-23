@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { CATEGORIES, CATEGORY_DISPLAY_ORDER, CATEGORY_BY_ID, OCCASIONS, SEASONS } from '../constants';
 import { COLORS, colorLabel, swatchStyle } from '../lib/colors';
 import type { Category, Occasion, Season } from '../types';
+import { LEVEL_LABEL, SUBTYPE_BY_ID, subtypesOf } from '../catalog';
 
 export interface ItemFields {
   name: string;
   category: Category | '';
+  subtype: string;
   color: string;
   season: Season;
   occasion: Occasion | '';
@@ -14,6 +16,7 @@ export interface ItemFields {
 
 export interface Hints {
   category?: Category;
+  subtype?: string;
   color?: string;
   season?: Season;
   occasion?: Occasion;
@@ -28,6 +31,21 @@ interface Props {
 
 function HintBadge({ show }: { show: boolean }) {
   return show ? <span className="hint-badge" title="Предложено автоматически — проверьте">подсказка</span> : null;
+}
+
+function SubtypeChips({ list, value, onPick, caption }: { list: { id: string; label: string }[]; value: string; onPick: (v: string) => void; caption?: string }) {
+  return (
+    <div className="subtype-group">
+      {caption && <span className="muted small">{caption}</span>}
+      <div className="chips">
+        {list.map((s) => (
+          <button type="button" key={s.id} className={`chip chip-sm ${value === s.id ? 'is-on' : ''}`} onClick={() => onPick(value === s.id ? '' : s.id)}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function ItemForm({ value, onChange, hints, showErrors }: Props) {
@@ -57,18 +75,45 @@ export function ItemForm({ value, onChange, hints, showErrors }: Props) {
         </span>
         <div className="chips">
           {ordered.map((c) => (
-            <button type="button" key={c.id} className={`chip ${value.category === c.id ? 'is-on' : ''}`} onClick={() => set('category', c.id)}>
+            <button
+              type="button"
+              key={c.id}
+              className={`chip ${value.category === c.id ? 'is-on' : ''}`}
+              onClick={() => value.category !== c.id && onChange({ ...value, category: c.id, subtype: hints?.category === c.id && hints.subtype ? hints.subtype : '' })}
+            >
               {c.label}
             </button>
           ))}
         </div>
         {showErrors && !value.category && <span className="field-error">Выберите категорию</span>}
         {hints?.category && hints.category !== value.category && (
-          <button type="button" className="link-btn" onClick={() => set('category', hints.category!)}>
-            Подсказка по имени файла: {CATEGORY_BY_ID[hints.category].label}
+          <button type="button" className="link-btn" onClick={() => onChange({ ...value, category: hints.category!, subtype: hints.subtype ?? '' })}>
+            Подсказка по имени файла: {hints.subtype ? SUBTYPE_BY_ID[hints.subtype]?.label : CATEGORY_BY_ID[hints.category].label}
           </button>
         )}
       </div>
+
+      {subtypesOf(value.category).length > 0 && (
+        <div className="field" data-testid="subtype-field">
+          <span className="field-label">
+            Вид
+            {value.subtype && SUBTYPE_BY_ID[value.subtype] && (
+              <b className="field-value">
+                · {SUBTYPE_BY_ID[value.subtype].level ? LEVEL_LABEL[SUBTYPE_BY_ID[value.subtype].level!] : SUBTYPE_BY_ID[value.subtype].zone.toLowerCase()}
+              </b>
+            )}
+            <HintBadge show={!!hints?.subtype && hints.subtype === value.subtype} />
+          </span>
+          {value.category === 'top' ? (
+            <>
+              <SubtypeChips list={subtypesOf('top').filter((s) => s.level === 'base')} value={value.subtype} onPick={(v) => set('subtype', v)} caption="Базовый слой" />
+              <SubtypeChips list={subtypesOf('top').filter((s) => s.level === 'mid')} value={value.subtype} onPick={(v) => set('subtype', v)} caption="Средний слой — поверх футболки" />
+            </>
+          ) : (
+            <SubtypeChips list={subtypesOf(value.category)} value={value.subtype} onPick={(v) => set('subtype', v)} />
+          )}
+        </div>
+      )}
 
       <div className="field">
         <span className="field-label">
